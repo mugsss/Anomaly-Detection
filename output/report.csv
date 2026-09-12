@@ -1,0 +1,73 @@
+loan_id,status,max_severity,anomaly_count,anomaly_codes,reasons,data_warnings
+37216892,FLAGGED,CRITICAL,4,PAYMENT_OVERDUE_UNPAID;LOAN_TERMINATED;XIRR_RATE_MISMATCH;EMPLOYMENT_CONTRADICTION,"[CRITICAL] 7 payment(s) are in state 'pending late' with no repayment date, 4043.23 still outstanding, oldest due 2023-06-20; loan-level days late is 271 | [CRITICAL] loan agreement was terminated with 3666.87 principal still outstanding and 271 days late | [HIGH] realized XIRR of 78.3% is 56.3 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 137 payment cash flows) | [MEDIUM] employment status is 'unemployed' but an occupation is recorded ('Skyriaus vadovas/shift leader') with 0 months at the current employer",
+31397492,FLAGGED,CRITICAL,3,PAYMENT_DEFAULT;XIRR_RATE_MISMATCH;EMPLOYMENT_CONTRADICTION,"[CRITICAL] 4 payment(s) settled 90+ days after the scheduled date; worst is a principal instalment due 2023-04-28 and repaid 2023-09-15, 140 days late | [HIGH] realized XIRR of 1501.9% is 1479.9 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 137 payment cash flows) | [MEDIUM] employment status is 'unemployed' but an occupation is recorded ('Pardavėja/ Saleswoman') with 0 months at the current employer",
+61752881,FLAGGED,CRITICAL,2,PAYMENT_DEFAULT;XIRR_RATE_MISMATCH,"[CRITICAL] 13 payment(s) settled 90+ days after the scheduled date; worst is a principal instalment due 2023-11-25 and repaid 2024-07-10, 228 days late | [HIGH] realized XIRR of 30.8% is 8.8 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 29 payment cash flows)",
+65318525,FLAGGED,CRITICAL,2,PAYMENT_DEFAULT;XIRR_RATE_MISMATCH,"[CRITICAL] 46 payment(s) settled 90+ days after the scheduled date; worst is a principal instalment due 2022-10-15 and repaid 2023-06-09, 237 days late | [HIGH] realized XIRR of -24.2% is 45.2 percentage points below the stated interest rate of 21% (tolerance 5pp, computed from 93 payment cash flows)",
+96579687,FLAGGED,CRITICAL,2,PAYMENT_DEFAULT;XIRR_RATE_MISMATCH,"[CRITICAL] 15 payment(s) settled 90+ days after the scheduled date; worst is a interest instalment due 2023-05-20 and repaid 2024-03-17, 302 days late | [HIGH] realized XIRR of 33.8% is 11.8 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 51 payment cash flows)",
+79811839,FLAGGED,CRITICAL,1,PAYMENT_DEFAULT,"[CRITICAL] 47 payment(s) settled 90+ days after the scheduled date; worst is a interest instalment due 2022-09-15 and repaid 2024-05-20, 613 days late",
+17611322,FLAGGED,HIGH,2,INTEREST_NEAR_ZERO;XIRR_RATE_MISMATCH,"[HIGH] total interest of 0.01 is effectively zero for a 129 loan at 33% over 12 months, which should generate roughly 21.29 (Outstanding interest + Repaid interest) | [HIGH] realized XIRR of 91.8% is 58.8 percentage points above the stated interest rate of 33% (tolerance 5pp, computed from 36 payment cash flows)",
+35294697,FLAGGED,HIGH,2,INTEREST_NEAR_ZERO;XIRR_RATE_MISMATCH,"[HIGH] total interest of 0.00 is effectively zero for a 263 loan at 25% over 12 months, which should generate roughly 32.88 (payment history) | [HIGH] realized XIRR of 93.2% is 68.2 percentage points above the stated interest rate of 25% (tolerance 5pp, computed from 35 payment cash flows)",
+46313736,FLAGGED,HIGH,2,INTEREST_NEAR_ZERO;XIRR_RATE_MISMATCH,"[HIGH] total interest of 0.00 is effectively zero for a 479 loan at 19% over 10 months, which should generate roughly 37.92 (payment history) | [HIGH] realized XIRR of 116.3% is 97.3 percentage points above the stated interest rate of 19% (tolerance 5pp, computed from 37 payment cash flows)",
+53926762,FLAGGED,HIGH,2,XIRR_RATE_MISMATCH;INCOME_INCONSISTENCY,"[HIGH] realized XIRR of 33.5% is 11.5 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 43 payment cash flows) | [MEDIUM] borrower income (1041.98) exceeds total family income (870.98) by 171.00, which is impossible since family income includes the borrower",
+58271697,FLAGGED,HIGH,2,INTEREST_NEAR_ZERO;XIRR_RATE_MISMATCH,"[HIGH] total interest of 0.14 is effectively zero for a 367 loan at 21% over 19 months, which should generate roughly 61.01 (Outstanding interest + Repaid interest) | [HIGH] realized XIRR of 55.6% is 34.6 percentage points above the stated interest rate of 21% (tolerance 5pp, computed from 29 payment cash flows)",
+78579969,FLAGGED,HIGH,2,XIRR_RATE_MISMATCH;EMPLOYMENT_CONTRADICTION,"[HIGH] realized XIRR of 25.8% is 6.8 percentage points above the stated interest rate of 19% (tolerance 5pp, computed from 45 payment cash flows) | [MEDIUM] employment status is 'unemployed' but an occupation is recorded ('Suvirintojas/locksmith') with 0 months at the current employer",
+14146974,FLAGGED,HIGH,1,INTEREST_NEAR_ZERO,"[HIGH] total interest of 0.00 is effectively zero for a 135 loan at 25% over 36 months, which should generate roughly 50.62 (payment history)",
+36885572,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of 28.3% is 6.3 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 39 payment cash flows)",
+56689556,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of 28.0% is 6.0 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 49 payment cash flows)",
+57949284,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of 37.7% is 15.7 percentage points above the stated interest rate of 22% (tolerance 5pp, computed from 40 payment cash flows)",
+73224837,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of 22.7% is 7.7 percentage points above the stated interest rate of 15% (tolerance 5pp, computed from 44 payment cash flows)",
+73371141,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of 140.8% is 125.8 percentage points above the stated interest rate of 15% (tolerance 5pp, computed from 36 payment cash flows)",
+76669736,FLAGGED,HIGH,1,XIRR_RATE_MISMATCH,"[HIGH] realized XIRR of -12.7% is 30.7 percentage points below the stated interest rate of 18% (tolerance 5pp, computed from 14 payment cash flows)",
+13314659,FLAGGED,MEDIUM,1,EMPLOYMENT_CONTRADICTION,"[MEDIUM] employment status is 'unemployed' but an occupation is recorded (""Auklėtojos padejėja / Tutor's helper"") with 0 months at the current employer",payment history truncated at source export limit; XIRR and amortization checks skipped
+13616691,NORMAL,NONE,0,,,
+13752758,NORMAL,NONE,0,,,
+13891862,NORMAL,NONE,0,,,
+19972183,NORMAL,NONE,0,,,
+25372336,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+26165342,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+26961823,NORMAL,NONE,0,,,
+28133318,NORMAL,NONE,0,,,
+29492418,NORMAL,NONE,0,,,
+32271989,NORMAL,NONE,0,,,
+32742879,NORMAL,NONE,0,,,
+33817222,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+34699374,NORMAL,NONE,0,,,
+35449965,NORMAL,NONE,0,,,
+35612451,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+35666371,NORMAL,NONE,0,,,
+41222884,NORMAL,NONE,0,,,
+41531189,NORMAL,NONE,0,,,
+43365273,NORMAL,NONE,0,,,
+43986823,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+51117775,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+51247328,NORMAL,NONE,0,,,
+53788773,NORMAL,NONE,0,,,
+56595445,NORMAL,NONE,0,,,
+56721442,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+57248583,NORMAL,NONE,0,,,
+57496522,NORMAL,NONE,0,,,
+58153155,NORMAL,NONE,0,,,
+59768427,NORMAL,NONE,0,,,
+62778129,NORMAL,NONE,0,,,
+64933882,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+66526158,NORMAL,NONE,0,,,
+68531246,NORMAL,NONE,0,,,
+69683127,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+71317797,NORMAL,NONE,0,,,
+72457171,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+74364775,NORMAL,NONE,0,,,
+79362712,NORMAL,NONE,0,,,
+82251944,NORMAL,NONE,0,,,
+82522951,NORMAL,NONE,0,,,
+83898441,NORMAL,NONE,0,,,
+86642894,NORMAL,NONE,0,,,
+87152791,NORMAL,NONE,0,,,
+94146169,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+94273288,NORMAL,NONE,0,,,
+94863476,NORMAL,NONE,0,,,
+94976997,NORMAL,NONE,0,,,
+95814762,NORMAL,NONE,0,,,payment history truncated at source export limit; XIRR and amortization checks skipped
+96227257,NORMAL,NONE,0,,,
+97751227,NORMAL,NONE,0,,,
+97987259,NORMAL,NONE,0,,,
+99981632,NORMAL,NONE,0,,,
