@@ -99,6 +99,11 @@ class Loan:
     borrower_liabilities: float | None = None
     family_liabilities: float | None = None
     dti: float | None = None
+    birth_year: int | None = None
+    # Business borrower fields
+    annual_revenue: float | None = None
+    number_of_employees: int | None = None
+    company_type: str | None = None
     # Payment history
     payments: list[Payment] = field(default_factory=list)
     payments_truncated: bool = False

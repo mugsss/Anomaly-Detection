@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,7 +16,32 @@ from .detectors import DETECTORS, WARNING_RULES, Detector, WarningRule
 from .loader import LoadReport, load_loans
 from .models import Anomaly, Loan, LoanResult, Severity
 
+TapeDetector = Callable[[Sequence[Loan]], dict[int, list[Anomaly]]]
+
 logger = logging.getLogger(__name__)
+
+
+def detect_duplicate_loan_ids(loans: Sequence[Loan]) -> dict[int, list[Anomaly]]:
+    """Tape-level check: flag loans whose ID appears more than once."""
+    counts: dict[int, int] = Counter(loan.loan_id for loan in loans)
+    duplicates = {lid for lid, count in counts.items() if count > 1}
+    if not duplicates:
+        return {}
+    results: dict[int, list[Anomaly]] = {}
+    for lid in duplicates:
+        results[lid] = [
+            Anomaly(
+                code="DUPLICATE_LOAN_ID",
+                severity=Severity.MEDIUM,
+                reason=f"Loan ID {lid} appears {counts[lid]} times in the tape",
+                detector="detect_duplicate_loan_ids",
+                evidence={"loan_id": lid, "count": counts[lid]},
+            )
+        ]
+    return results
+
+
+TAPE_DETECTORS: tuple[TapeDetector, ...] = (detect_duplicate_loan_ids,)
 
 
 @dataclass(slots=True)
@@ -118,13 +143,29 @@ def analyse(
     loans: Iterable[Loan],
     detectors: Sequence[Detector] = DETECTORS,
     warning_rules: Sequence[WarningRule] = WARNING_RULES,
+    tape_detectors: Sequence[TapeDetector] = TAPE_DETECTORS,
 ) -> PipelineResult:
     """Run the detector suite over already-loaded loans."""
+    loan_list = list(loans)
     outcome = PipelineResult()
-    for loan in loans:
+    for loan in loan_list:
         result, errors = run_detectors(loan, detectors, warning_rules)
         outcome.results.append(result)
         outcome.detector_errors.extend(errors)
+
+    # Tape-level detectors (cross-loan checks like duplicate IDs)
+    results_by_id = {r.loan_id: r for r in outcome.results}
+    for tape_detector in tape_detectors:
+        try:
+            findings = tape_detector(loan_list)
+        except Exception as exc:
+            name = getattr(tape_detector, "__name__", repr(tape_detector))
+            logger.exception("Tape detector %s failed: %s", name, exc)
+            continue
+        for loan_id, anomalies in findings.items():
+            if loan_id in results_by_id:
+                results_by_id[loan_id].anomalies.extend(anomalies)
+
     return outcome
 
 

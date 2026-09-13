@@ -25,18 +25,24 @@ from src.detectors import (
     annuity_payment,
     build_cash_flows,
     compute_xirr,
+    detect_age_at_origination,
     detect_amortization_mismatch,
+    detect_categorical_values,
     detect_data_validity,
     detect_employment_contradiction,
+    detect_field_completeness,
     detect_income_inconsistency,
     detect_interest_anomaly,
     detect_loan_status_anomaly,
+    detect_monthly_payment_vs_income,
     detect_payment_default,
+    detect_schedule_integrity,
     detect_xirr_mismatch,
     warn_truncated_payments,
     weighted_average_life,
 )
 from src.models import Severity
+from src.pipeline import detect_duplicate_loan_ids
 from tests.conftest import CLEAN_LOANS, IRREGULAR_LOAN, make_loan, make_payment
 
 # Loans the EDA identified for each rule. These are the regression contract.
@@ -552,3 +558,347 @@ class TestDetectorContract:
                 for anomaly in detector(loan):
                     owners.setdefault(anomaly.code, detector.__name__)
                     assert owners[anomaly.code] == detector.__name__
+
+
+# --- Schedule integrity -------------------------------------------------------
+
+
+class TestScheduleIntegrity:
+    def test_gap_over_45_days_is_flagged(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01"),
+            make_payment("2024-03-15", "2024-03-15"),  # 74 days gap
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        codes = [a.code for a in found]
+        assert "SCHEDULE_GAP" in codes
+        assert all(a.severity is Severity.MEDIUM for a in found if a.code == "SCHEDULE_GAP")
+
+    def test_gap_within_45_days_is_fine(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01"),
+            make_payment("2024-02-01", "2024-02-01"),  # 31 days
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        assert not any(a.code == "SCHEDULE_GAP" for a in found)
+
+    def test_spike_over_5x_median_is_flagged(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01", amount=100.0),
+            make_payment("2024-02-01", "2024-02-01", amount=100.0),
+            make_payment("2024-03-01", "2024-03-01", amount=100.0),
+            make_payment("2024-04-01", "2024-04-01", amount=600.0),  # 6x median
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        codes = [a.code for a in found]
+        assert "PAYMENT_AMOUNT_SPIKE" in codes
+        assert all(
+            a.severity is Severity.MEDIUM for a in found if a.code == "PAYMENT_AMOUNT_SPIKE"
+        )
+
+    def test_spike_at_or_below_5x_is_fine(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01", amount=100.0),
+            make_payment("2024-02-01", "2024-02-01", amount=100.0),
+            make_payment("2024-03-01", "2024-03-01", amount=500.0),  # exactly 5x
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        assert not any(a.code == "PAYMENT_AMOUNT_SPIKE" for a in found)
+
+    def test_truncated_loan_is_skipped(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01"),
+            make_payment("2024-06-01", "2024-06-01"),  # huge gap, but truncated
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments, payments_truncated=True))
+        assert found == []
+
+    def test_overdue_interest_excluded_from_gap_check(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01"),
+            make_payment("2024-06-01", "2024-06-01", payment_type="overdue interest"),
+            make_payment("2024-02-01", "2024-02-01"),
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        assert not any(a.code == "SCHEDULE_GAP" for a in found)
+
+    def test_early_repayments_excluded_from_spike_check(self):
+        payments = [
+            make_payment("2024-01-01", "2024-01-01", amount=100.0),
+            make_payment("2024-02-01", "2024-02-01", amount=100.0),
+            make_payment("2024-03-01", "2024-03-01", amount=100.0),
+            make_payment(
+                "2024-04-01", "2024-04-01", amount=5000.0,
+                payment_type="full early repayment",
+            ),
+        ]
+        found = detect_schedule_integrity(make_loan(payments=payments))
+        assert not any(a.code == "PAYMENT_AMOUNT_SPIKE" for a in found)
+
+
+# --- Age at origination ------------------------------------------------------
+
+
+class TestAgeAtOrigination:
+    def test_underage_borrower_is_high(self):
+        loan = make_loan(birth_year=2010, disbursal_date=date(2024, 6, 1))
+        found = detect_age_at_origination(loan)
+        assert len(found) == 1
+        assert found[0].code == "UNDERAGE_BORROWER"
+        assert found[0].severity is Severity.HIGH
+
+    def test_normal_adult_is_fine(self):
+        loan = make_loan(birth_year=1990, disbursal_date=date(2024, 1, 1))
+        assert detect_age_at_origination(loan) == []
+
+    def test_age_over_90_not_flagged_here(self):
+        loan = make_loan(birth_year=1920, disbursal_date=date(2024, 1, 1))
+        assert detect_age_at_origination(loan) == []
+
+    def test_null_birth_year_is_skipped(self):
+        loan = make_loan(birth_year=None)
+        assert detect_age_at_origination(loan) == []
+
+    def test_age_exactly_18_is_fine(self):
+        loan = make_loan(birth_year=2006, disbursal_date=date(2024, 1, 1))
+        assert detect_age_at_origination(loan) == []
+
+
+# --- Monthly payment vs income -----------------------------------------------
+
+
+class TestMonthlyPaymentVsIncome:
+    def test_payment_exceeds_income_is_flagged(self):
+        loan = make_loan(monthly_payment=1500.0, borrower_income=1000.0)
+        found = detect_monthly_payment_vs_income(loan)
+        assert len(found) == 1
+        assert found[0].code == "PAYMENT_EXCEEDS_INCOME"
+        assert found[0].severity is Severity.MEDIUM
+
+    def test_payment_within_income_is_fine(self):
+        loan = make_loan(monthly_payment=500.0, borrower_income=1000.0)
+        assert detect_monthly_payment_vs_income(loan) == []
+
+    def test_zero_income_is_skipped(self):
+        loan = make_loan(monthly_payment=500.0, borrower_income=0.0)
+        assert detect_monthly_payment_vs_income(loan) == []
+
+    def test_null_income_is_skipped(self):
+        loan = make_loan(monthly_payment=500.0, borrower_income=None)
+        assert detect_monthly_payment_vs_income(loan) == []
+
+
+# --- Expanded data validity (Rule 8) -----------------------------------------
+
+
+class TestExpandedDataValidity:
+    def test_placeholder_value_is_flagged(self):
+        loan = make_loan(borrower_id="N/A")
+        found = detect_data_validity(loan)
+        assert any(a.code == "PLACEHOLDER_VALUE" for a in found)
+
+    def test_outstanding_exceeds_principal_by_over_1_percent(self):
+        loan = make_loan(loan_amount=1000.0, outstanding_principal=1020.0)
+        found = detect_data_validity(loan)
+        assert any(a.code == "OUTSTANDING_EXCEEDS_PRINCIPAL" for a in found)
+
+    def test_outstanding_within_1_percent_is_fine(self):
+        loan = make_loan(loan_amount=1000.0, outstanding_principal=1005.0)
+        found = detect_data_validity(loan)
+        assert not any(a.code == "OUTSTANDING_EXCEEDS_PRINCIPAL" for a in found)
+
+    def test_zero_interest_rate_is_high(self):
+        loan = make_loan(interest_rate=0)
+        found = detect_data_validity(loan)
+        zero_rate = [a for a in found if a.code == "ZERO_INTEREST_RATE"]
+        assert len(zero_rate) == 1
+        assert zero_rate[0].severity is Severity.HIGH
+
+    def test_zero_loan_amount_is_high(self):
+        loan = make_loan(loan_amount=0)
+        found = detect_data_validity(loan)
+        zero_amount = [a for a in found if a.code == "ZERO_LOAN_AMOUNT"]
+        assert len(zero_amount) == 1
+        assert zero_amount[0].severity is Severity.HIGH
+
+    def test_future_disbursal_with_payments_is_flagged(self):
+        loan = make_loan(
+            disbursal_date=date(2030, 1, 1),
+            payments=[make_payment("2030-01-15", "2030-01-15")],
+        )
+        found = detect_data_validity(loan)
+        assert any(a.code == "FUTURE_DISBURSAL" for a in found)
+
+    def test_future_disbursal_repaid_is_flagged(self):
+        loan = make_loan(disbursal_date=date(2030, 1, 1), loan_status="repaid")
+        found = detect_data_validity(loan)
+        assert any(a.code == "FUTURE_DISBURSAL" for a in found)
+
+    def test_future_disbursal_no_payments_not_repaid_is_fine(self):
+        loan = make_loan(
+            disbursal_date=date(2030, 1, 1), loan_status="granted", payments=[],
+        )
+        found = detect_data_validity(loan)
+        assert not any(a.code == "FUTURE_DISBURSAL" for a in found)
+
+    def test_zero_dti_with_income_on_granted_loan_is_flagged(self):
+        loan = make_loan(
+            dti=0.0, borrower_income=1000.0, loan_status="granted",
+        )
+        found = detect_data_validity(loan)
+        assert any(a.code == "ZERO_DTI" for a in found)
+
+    def test_nonzero_dti_is_fine(self):
+        loan = make_loan(dti=25.0, borrower_income=1000.0, loan_status="granted")
+        found = detect_data_validity(loan)
+        assert not any(a.code == "ZERO_DTI" for a in found)
+
+    def test_unexpected_arrears_on_healthy_loan_is_flagged(self):
+        loan = make_loan(arrears=50.0, days_late=10, loan_status="granted")
+        found = detect_data_validity(loan)
+        assert any(a.code == "UNEXPECTED_ARREARS" for a in found)
+
+    def test_arrears_on_terminated_loan_is_fine(self):
+        loan = make_loan(arrears=50.0, days_late=10, loan_status="terminated")
+        found = detect_data_validity(loan)
+        assert not any(a.code == "UNEXPECTED_ARREARS" for a in found)
+
+    def test_arrears_on_delinquent_loan_is_fine(self):
+        loan = make_loan(arrears=50.0, days_late=95, loan_status="granted")
+        found = detect_data_validity(loan)
+        assert not any(a.code == "UNEXPECTED_ARREARS" for a in found)
+
+    def test_age_over_90_is_data_entry_error(self):
+        loan = make_loan(birth_year=1920, disbursal_date=date(2024, 1, 1))
+        found = detect_data_validity(loan)
+        assert any(a.code == "AGE_DATA_ENTRY_ERROR" for a in found)
+        age_finding = [a for a in found if a.code == "AGE_DATA_ENTRY_ERROR"][0]
+        assert age_finding.severity is Severity.MEDIUM
+
+    def test_normal_age_no_data_entry_error(self):
+        loan = make_loan(birth_year=1990, disbursal_date=date(2024, 1, 1))
+        found = detect_data_validity(loan)
+        assert not any(a.code == "AGE_DATA_ENTRY_ERROR" for a in found)
+
+
+# --- Duplicate Loan IDs (tape-level) -----------------------------------------
+
+
+class TestDuplicateLoanIds:
+    def test_duplicate_ids_are_flagged(self):
+        from src.models import Loan
+        loans = [Loan(loan_id=1), Loan(loan_id=1), Loan(loan_id=2)]
+        findings = detect_duplicate_loan_ids(loans)
+        assert 1 in findings
+        assert 2 not in findings
+        assert findings[1][0].code == "DUPLICATE_LOAN_ID"
+
+    def test_unique_ids_produce_no_findings(self):
+        from src.models import Loan
+        loans = [Loan(loan_id=1), Loan(loan_id=2), Loan(loan_id=3)]
+        assert detect_duplicate_loan_ids(loans) == {}
+
+
+# --- Field completeness ------------------------------------------------------
+
+
+class TestFieldCompleteness:
+    def test_missing_business_fields_are_flagged(self):
+        loan = make_loan(
+            borrower_type="business",
+            annual_revenue=None,
+            number_of_employees=None,
+            company_type=None,
+        )
+        found = detect_field_completeness(loan)
+        assert len(found) == 1
+        assert found[0].code == "FIELD_COMPLETENESS"
+        assert found[0].severity is Severity.LOW
+        assert "Annual revenue" in found[0].reason
+
+    def test_complete_business_fields_are_fine(self):
+        loan = make_loan(
+            borrower_type="business",
+            annual_revenue=500000.0,
+            number_of_employees=10,
+            company_type="LLC",
+        )
+        assert detect_field_completeness(loan) == []
+
+    def test_missing_individual_fields_are_flagged(self):
+        loan = make_loan(
+            borrower_type="individual", birth_year=None, employment_status=None,
+        )
+        found = detect_field_completeness(loan)
+        assert len(found) == 1
+        assert found[0].severity is Severity.LOW
+        assert "Birth year" in found[0].reason
+
+    def test_complete_individual_fields_are_fine(self):
+        loan = make_loan(
+            borrower_type="individual", birth_year=1990,
+            employment_status="employed full time",
+        )
+        assert detect_field_completeness(loan) == []
+
+    def test_unknown_borrower_type_is_skipped(self):
+        loan = make_loan(borrower_type=None)
+        assert detect_field_completeness(loan) == []
+
+
+# --- Categorical value validation ---------------------------------------------
+
+
+class TestCategoricalValues:
+    def test_invalid_credit_score_is_flagged(self):
+        loan = make_loan(credit_score="X")
+        found = detect_categorical_values(loan)
+        assert len(found) == 1
+        assert found[0].code == "INVALID_CATEGORICAL_VALUE"
+        assert found[0].severity is Severity.MEDIUM
+
+    def test_valid_credit_scores_are_fine(self):
+        for score in ("A", "B", "C", "D"):
+            assert detect_categorical_values(make_loan(credit_score=score)) == []
+
+    def test_invalid_loan_type_is_flagged(self):
+        loan = make_loan(loan_type="balloon")
+        found = detect_categorical_values(loan)
+        assert any(a.code == "INVALID_CATEGORICAL_VALUE" for a in found)
+
+    def test_valid_loan_types_are_fine(self):
+        for lt in ("instalment", "deferred annuity"):
+            assert detect_categorical_values(make_loan(loan_type=lt)) == []
+
+    def test_null_value_is_not_flagged(self):
+        loan = make_loan(credit_score=None, employment_status=None)
+        assert detect_categorical_values(loan) == []
+
+    def test_valid_employment_statuses_are_fine(self):
+        for status in ("employed full time", "self employed", "unemployed"):
+            assert detect_categorical_values(make_loan(employment_status=status)) == []
+
+
+# --- Reference loan regression for new detectors -----------------------------
+
+
+class TestNewDetectorsOnReferenceLoanRegression:
+    @pytest.mark.parametrize("loan_id", CLEAN_LOANS)
+    def test_schedule_integrity_clean(self, by_id, loan_id):
+        assert detect_schedule_integrity(by_id[loan_id]) == []
+
+    @pytest.mark.parametrize("loan_id", CLEAN_LOANS)
+    def test_age_at_origination_clean(self, by_id, loan_id):
+        assert detect_age_at_origination(by_id[loan_id]) == []
+
+    @pytest.mark.parametrize("loan_id", CLEAN_LOANS)
+    def test_monthly_payment_vs_income_clean(self, by_id, loan_id):
+        assert detect_monthly_payment_vs_income(by_id[loan_id]) == []
+
+    @pytest.mark.parametrize("loan_id", CLEAN_LOANS)
+    def test_field_completeness_clean(self, by_id, loan_id):
+        assert detect_field_completeness(by_id[loan_id]) == []
+
+    @pytest.mark.parametrize("loan_id", CLEAN_LOANS)
+    def test_categorical_values_clean(self, by_id, loan_id):
+        assert detect_categorical_values(by_id[loan_id]) == []

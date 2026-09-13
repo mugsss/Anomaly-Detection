@@ -77,6 +77,52 @@ NON_NEGATIVE_FIELDS = (
     "repaid_interest", "days_late", "arrears",
 )
 
+#: Gap in consecutive scheduled payment dates (days) that triggers a flag.
+SCHEDULE_GAP_DAYS = 45
+
+#: A single payment above this multiple of the median is flagged as a spike.
+PAYMENT_SPIKE_MULTIPLE = 5.0
+
+#: Payment types excluded from schedule-integrity checks.
+SCHEDULE_EXCLUDED_TYPES = frozenset({
+    "overdue interest", "partial early repayment", "full early repayment",
+})
+
+#: Placeholder/dummy values that should not appear in required fields.
+PLACEHOLDER_VALUES = frozenset({
+    "no data", "99999", "n/a", "tbd", "null", "0000-00-00",
+})
+
+#: Required fields checked for placeholder values.
+PLACEHOLDER_CHECK_FIELDS = {
+    "loan_id": "Loan ID",
+    "borrower_id": "Borrower ID",
+    "loan_amount": "Loan amount",
+    "interest_rate": "Interest rate",
+    "loan_term": "Loan term",
+    "disbursal_date": "Disbursal date",
+}
+
+#: Allowed categorical value sets.
+CATEGORICAL_ALLOWED: dict[str, frozenset[str]] = {
+    "credit_score": frozenset({"a", "b", "c", "d"}),
+    "borrower_type": frozenset({"individual", "business"}),
+    "loan_type": frozenset({"instalment", "deferred annuity"}),
+    "loan_status": frozenset({"granted", "repaid", "terminated"}),
+    "employment_status": frozenset({
+        "employed full time", "self employed", "unemployed",
+    }),
+}
+
+#: Human labels for categorical fields (for reporting).
+CATEGORICAL_LABELS: dict[str, str] = {
+    "credit_score": "Credit score",
+    "borrower_type": "Borrower type",
+    "loan_type": "Loan type",
+    "loan_status": "Loan status",
+    "employment_status": "Employment status",
+}
+
 
 # --- Shared helpers ---------------------------------------------------------
 
@@ -703,6 +749,367 @@ def detect_data_validity(loan: Loan) -> list[Anomaly]:
             )
         )
 
+    # --- Placeholder/dummy values in required fields ---
+    placeholders_found: list[str] = []
+    for attr, label in PLACEHOLDER_CHECK_FIELDS.items():
+        raw = getattr(loan, attr, None)
+        if raw is not None and str(raw).strip().lower() in PLACEHOLDER_VALUES:
+            placeholders_found.append(f"{label}={raw!r}")
+    if placeholders_found:
+        anomalies.append(
+            Anomaly(
+                code="PLACEHOLDER_VALUE",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"placeholder/dummy value in required field(s): "
+                    f"{', '.join(placeholders_found)}"
+                ),
+                detector="detect_data_validity",
+                evidence={"fields": placeholders_found},
+            )
+        )
+
+    # --- Outstanding principal > loan amount by more than 1% ---
+    if (
+        loan.outstanding_principal is not None
+        and loan.loan_amount is not None
+        and loan.loan_amount > 0
+        and loan.outstanding_principal > loan.loan_amount * 1.01
+    ):
+        anomalies.append(
+            Anomaly(
+                code="OUTSTANDING_EXCEEDS_PRINCIPAL",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"outstanding principal ({loan.outstanding_principal:.2f}) exceeds "
+                    f"loan amount ({loan.loan_amount:.2f}) by more than 1%"
+                ),
+                detector="detect_data_validity",
+                evidence={
+                    "outstanding_principal": loan.outstanding_principal,
+                    "loan_amount": loan.loan_amount,
+                },
+            )
+        )
+
+    # --- Zero interest rate ---
+    if loan.interest_rate is not None and loan.interest_rate == 0:
+        anomalies.append(
+            Anomaly(
+                code="ZERO_INTEREST_RATE",
+                severity=Severity.HIGH,
+                reason="interest rate is zero",
+                detector="detect_data_validity",
+                evidence={"interest_rate": loan.interest_rate},
+            )
+        )
+
+    # --- Zero loan amount ---
+    if loan.loan_amount is not None and loan.loan_amount == 0:
+        anomalies.append(
+            Anomaly(
+                code="ZERO_LOAN_AMOUNT",
+                severity=Severity.HIGH,
+                reason="loan amount is zero",
+                detector="detect_data_validity",
+                evidence={"loan_amount": loan.loan_amount},
+            )
+        )
+
+    # --- Future disbursal with existing payments or repaid status ---
+    if loan.disbursal_date is not None and loan.disbursal_date > date.today():
+        status = (loan.loan_status or "").strip().lower()
+        has_payments = bool(loan.payments)
+        if has_payments or status == "repaid":
+            anomalies.append(
+                Anomaly(
+                    code="FUTURE_DISBURSAL",
+                    severity=Severity.MEDIUM,
+                    reason=(
+                        f"disbursal date {loan.disbursal_date} is in the future but "
+                        f"{'loan is already repaid' if status == 'repaid' else 'payments exist'}"
+                    ),
+                    detector="detect_data_validity",
+                    evidence={
+                        "disbursal_date": str(loan.disbursal_date),
+                        "loan_status": loan.loan_status,
+                        "has_payments": has_payments,
+                    },
+                )
+            )
+
+    # --- DTI = 0 with positive income on a granted loan ---
+    status_lower = (loan.loan_status or "").strip().lower()
+    if (
+        status_lower == "granted"
+        and loan.borrower_income is not None
+        and loan.borrower_income > 0
+        and loan.dti is not None
+        and loan.dti == 0
+    ):
+        anomalies.append(
+            Anomaly(
+                code="ZERO_DTI",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"DTI is zero on a granted loan with borrower income "
+                    f"of {loan.borrower_income:.2f}"
+                ),
+                detector="detect_data_validity",
+                evidence={
+                    "dti": loan.dti,
+                    "borrower_income": loan.borrower_income,
+                    "loan_status": loan.loan_status,
+                },
+            )
+        )
+
+    # --- Arrears > 0 on non-terminated, non-delinquent loan ---
+    if (
+        loan.arrears is not None
+        and loan.arrears > 0
+        and status_lower != "terminated"
+        and (loan.days_late is None or loan.days_late < DEFAULT_DELAY_DAYS)
+    ):
+        anomalies.append(
+            Anomaly(
+                code="UNEXPECTED_ARREARS",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"arrears of {loan.arrears:.2f} on a loan that is "
+                    f"neither terminated nor delinquent (days late: {loan.days_late})"
+                ),
+                detector="detect_data_validity",
+                evidence={
+                    "arrears": loan.arrears,
+                    "days_late": loan.days_late,
+                    "loan_status": loan.loan_status,
+                },
+            )
+        )
+
+    # --- Age > 90 at origination (data-entry error) ---
+    age = _age_at_origination(loan)
+    if age is not None and age > 90:
+        anomalies.append(
+            Anomaly(
+                code="AGE_DATA_ENTRY_ERROR",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"borrower age at origination was {age}, likely a data-entry error"
+                ),
+                detector="detect_data_validity",
+                evidence={"age_at_origination": age, "birth_year": loan.birth_year},
+            )
+        )
+
+    return anomalies
+
+
+# --- New detector: schedule integrity -----------------------------------------
+
+
+def detect_schedule_integrity(loan: Loan) -> list[Anomaly]:
+    """Gap and spike detection in the payment schedule."""
+    if loan.payments_truncated:
+        return []
+
+    anomalies: list[Anomaly] = []
+
+    # Filter to regular scheduled payments (exclude overdue interest & early repayments)
+    regular = [
+        p for p in loan.payments
+        if p.payment_type.lower() not in SCHEDULE_EXCLUDED_TYPES
+        and p.due_date is not None
+    ]
+
+    # --- Gap detection: consecutive scheduled dates > 45 days apart ---
+    dated = sorted(regular, key=lambda p: p.due_date)
+    for i in range(1, len(dated)):
+        gap = (dated[i].due_date - dated[i - 1].due_date).days
+        if gap > SCHEDULE_GAP_DAYS:
+            anomalies.append(
+                Anomaly(
+                    code="SCHEDULE_GAP",
+                    severity=Severity.MEDIUM,
+                    reason=(
+                        f"gap of {gap} days between consecutive scheduled payments "
+                        f"({dated[i - 1].due_date} to {dated[i].due_date})"
+                    ),
+                    detector="detect_schedule_integrity",
+                    evidence={
+                        "gap_days": gap,
+                        "from_date": str(dated[i - 1].due_date),
+                        "to_date": str(dated[i].due_date),
+                    },
+                )
+            )
+
+    # --- Amount spike detection ---
+    # Exclude early repayments and contract fees from amount analysis
+    amount_excluded = SCHEDULE_EXCLUDED_TYPES | {"contract fee repayment"}
+    amount_payments = [
+        p for p in loan.payments
+        if p.payment_type.lower() not in amount_excluded
+        and p.amount > 0
+    ]
+    if amount_payments:
+        med = _median([p.amount for p in amount_payments])
+        if med > 0:
+            for p in amount_payments:
+                if p.amount > PAYMENT_SPIKE_MULTIPLE * med:
+                    anomalies.append(
+                        Anomaly(
+                            code="PAYMENT_AMOUNT_SPIKE",
+                            severity=Severity.MEDIUM,
+                            reason=(
+                                f"scheduled payment of {p.amount:.2f} on {p.due_date} "
+                                f"exceeds {PAYMENT_SPIKE_MULTIPLE:.0f}x the median "
+                                f"({med:.2f})"
+                            ),
+                            detector="detect_schedule_integrity",
+                            evidence={
+                                "amount": p.amount,
+                                "median": round(med, 2),
+                                "multiple": round(p.amount / med, 1),
+                                "date": str(p.due_date),
+                            },
+                        )
+                    )
+
+    return anomalies
+
+
+# --- New detector: age at origination ----------------------------------------
+
+
+def _age_at_origination(loan: Loan) -> int | None:
+    """Calculate borrower age at disbursal from birth year."""
+    if loan.birth_year is None or loan.disbursal_date is None:
+        return None
+    return loan.disbursal_date.year - loan.birth_year
+
+
+def detect_age_at_origination(loan: Loan) -> list[Anomaly]:
+    """Flag underage borrowers (legal issue)."""
+    age = _age_at_origination(loan)
+    if age is None:
+        return []
+    if age < 18:
+        return [
+            Anomaly(
+                code="UNDERAGE_BORROWER",
+                severity=Severity.HIGH,
+                reason=(
+                    f"borrower was {age} years old at origination "
+                    f"(born {loan.birth_year}, disbursed {loan.disbursal_date})"
+                ),
+                detector="detect_age_at_origination",
+                evidence={
+                    "age_at_origination": age,
+                    "birth_year": loan.birth_year,
+                    "disbursal_date": str(loan.disbursal_date),
+                },
+            )
+        ]
+    return []
+
+
+# --- New detector: monthly payment vs income ----------------------------------
+
+
+def detect_monthly_payment_vs_income(loan: Loan) -> list[Anomaly]:
+    """Flag when the monthly payment exceeds borrower income."""
+    if (
+        loan.borrower_income is None
+        or loan.borrower_income <= 0
+        or loan.monthly_payment is None
+    ):
+        return []
+    if loan.monthly_payment > loan.borrower_income:
+        return [
+            Anomaly(
+                code="PAYMENT_EXCEEDS_INCOME",
+                severity=Severity.MEDIUM,
+                reason=(
+                    f"monthly payment ({loan.monthly_payment:.2f}) exceeds borrower "
+                    f"income ({loan.borrower_income:.2f})"
+                ),
+                detector="detect_monthly_payment_vs_income",
+                evidence={
+                    "monthly_payment": loan.monthly_payment,
+                    "borrower_income": loan.borrower_income,
+                },
+            )
+        ]
+    return []
+
+
+# --- New detector: field completeness -----------------------------------------
+
+
+def detect_field_completeness(loan: Loan) -> list[Anomaly]:
+    """Flag missing fields based on borrower type."""
+    btype = (loan.borrower_type or "").strip().lower()
+    if not btype:
+        return []
+
+    missing: list[str] = []
+    if btype == "business":
+        if loan.annual_revenue is None:
+            missing.append("Annual revenue")
+        if loan.number_of_employees is None:
+            missing.append("Number of employees")
+        if not (loan.company_type or "").strip():
+            missing.append("Company type")
+    elif btype == "individual":
+        if loan.birth_year is None:
+            missing.append("Birth year")
+        if not (loan.employment_status or "").strip():
+            missing.append("Employment status")
+
+    if not missing:
+        return []
+    return [
+        Anomaly(
+            code="FIELD_COMPLETENESS",
+            severity=Severity.LOW,
+            reason=(
+                f"missing field(s) for {btype} borrower: {', '.join(missing)}"
+            ),
+            detector="detect_field_completeness",
+            evidence={"borrower_type": btype, "missing_fields": missing},
+        )
+    ]
+
+
+# --- New detector: categorical value validation -------------------------------
+
+
+def detect_categorical_values(loan: Loan) -> list[Anomaly]:
+    """Validate categorical fields against allowed value sets."""
+    anomalies: list[Anomaly] = []
+    for attr, allowed in CATEGORICAL_ALLOWED.items():
+        raw = getattr(loan, attr, None)
+        if raw is None:
+            continue
+        normalised = str(raw).strip().lower()
+        if not normalised:
+            continue
+        if normalised not in allowed:
+            label = CATEGORICAL_LABELS[attr]
+            anomalies.append(
+                Anomaly(
+                    code="INVALID_CATEGORICAL_VALUE",
+                    severity=Severity.MEDIUM,
+                    reason=(
+                        f"{label} value {raw!r} is not in the allowed set "
+                        f"{{{', '.join(sorted(allowed))}}}"
+                    ),
+                    detector="detect_categorical_values",
+                    evidence={"field": attr, "value": raw, "allowed": sorted(allowed)},
+                )
+            )
     return anomalies
 
 
@@ -716,6 +1123,11 @@ DETECTORS: tuple[Detector, ...] = (
     detect_loan_status_anomaly,
     detect_amortization_mismatch,
     detect_data_validity,
+    detect_schedule_integrity,
+    detect_age_at_origination,
+    detect_monthly_payment_vs_income,
+    detect_field_completeness,
+    detect_categorical_values,
 )
 
 #: Source-completeness rules. These annotate a loan; they never flag it.

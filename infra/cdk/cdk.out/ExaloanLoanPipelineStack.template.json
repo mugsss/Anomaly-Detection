@@ -1,0 +1,1795 @@
+{
+ "Description": "Loan-tape onboarding: S3 -> Step Functions -> Fargate -> ArangoDB",
+ "Resources": {
+  "LoanTapeBucket9CC79B98": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "Id": "ArchiveRawUploadsAfter90Days",
+       "Prefix": "raw-uploads/",
+       "Status": "Enabled",
+       "Transitions": [
+        {
+         "StorageClass": "GLACIER",
+         "TransitionInDays": 90
+        }
+       ]
+      },
+      {
+       "Id": "ExpireOldVersions",
+       "NoncurrentVersionTransitions": [
+        {
+         "StorageClass": "GLACIER",
+         "TransitionInDays": 30
+        }
+       ],
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/LoanTapeBucket/Resource"
+   }
+  },
+  "LoanTapeBucketNotificationsHandlerPolicy47484A9A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:PutBucketNotification",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "LoanTapeBucket9CC79B98",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "LoanTapeBucketNotificationsHandlerPolicy47484A9A",
+    "Roles": [
+     {
+      "Ref": "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/LoanTapeBucket/Notifications/HandlerPolicy/Resource"
+   }
+  },
+  "LoanTapeBucketNotificationsD24CE5C9": {
+   "Type": "Custom::S3BucketNotifications",
+   "Properties": {
+    "ServiceToken": {
+     "Fn::GetAtt": [
+      "BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691",
+      "Arn"
+     ]
+    },
+    "BucketName": {
+     "Ref": "LoanTapeBucket9CC79B98"
+    },
+    "NotificationConfiguration": {
+     "EventBridgeConfiguration": {}
+    },
+    "Managed": true,
+    "SkipDestinationValidation": false
+   },
+   "DependsOn": [
+    "LoanTapeBucketNotificationsHandlerPolicy47484A9A"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/LoanTapeBucket/Notifications/Resource"
+   }
+  },
+  "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role/Resource"
+   }
+  },
+  "BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Description": "AWS CloudFormation handler for \"Custom::S3BucketNotifications\" resources (@aws-cdk/aws-s3)",
+    "Code": {
+     "ZipFile": "import boto3  # type: ignore\nimport json\nimport logging\nimport urllib.request\n\ns3 = boto3.client(\"s3\")\n\nEVENTBRIDGE_CONFIGURATION = 'EventBridgeConfiguration'\nCONFIGURATION_TYPES = [\"TopicConfigurations\", \"QueueConfigurations\", \"LambdaFunctionConfigurations\"]\n\ndef handler(event: dict, context):\n  response_status = \"SUCCESS\"\n  error_message = \"\"\n  try:\n    props = event[\"ResourceProperties\"]\n    notification_configuration = props[\"NotificationConfiguration\"]\n    managed = props.get('Managed', 'true').lower() == 'true'\n    skipDestinationValidation = props.get('SkipDestinationValidation', 'false').lower() == 'true'\n    stack_id = event['StackId']\n    old = event.get(\"OldResourceProperties\", {}).get(\"NotificationConfiguration\", {})\n    if managed:\n      config = handle_managed(event[\"RequestType\"], notification_configuration)\n    else:\n      config = handle_unmanaged(props[\"BucketName\"], stack_id, event[\"RequestType\"], notification_configuration, old)\n    s3.put_bucket_notification_configuration(Bucket=props[\"BucketName\"], NotificationConfiguration=config, SkipDestinationValidation=skipDestinationValidation)\n  except Exception as e:\n    logging.exception(\"Failed to put bucket notification configuration\")\n    response_status = \"FAILED\"\n    error_message = f\"Error: {str(e)}. \"\n  finally:\n    submit_response(event, context, response_status, error_message)\n\ndef handle_managed(request_type, notification_configuration):\n  if request_type == 'Delete':\n    return {}\n  return notification_configuration\n\ndef handle_unmanaged(bucket, stack_id, request_type, notification_configuration, old):\n  def get_id(n):\n    n['Id'] = ''\n    sorted_notifications = sort_filter_rules(n)\n    strToHash=json.dumps(sorted_notifications, sort_keys=True).replace('\"Name\": \"prefix\"', '\"Name\": \"Prefix\"').replace('\"Name\": \"suffix\"', '\"Name\": \"Suffix\"')\n    return f\"{stack_id}-{hash(strToHash)}\"\n  def with_id(n):\n    n['Id'] = get_id(n)\n    return n\n\n  external_notifications = {}\n  existing_notifications = s3.get_bucket_notification_configuration(Bucket=bucket)\n  for t in CONFIGURATION_TYPES:\n    if request_type == 'Update':\n        old_incoming_ids = [get_id(n) for n in old.get(t, [])]\n        external_notifications[t] = [n for n in existing_notifications.get(t, []) if not get_id(n) in old_incoming_ids]      \n    elif request_type == 'Delete':\n        external_notifications[t] = [n for n in existing_notifications.get(t, []) if not n['Id'].startswith(f\"{stack_id}-\")]\n    elif request_type == 'Create':\n        external_notifications[t] = [n for n in existing_notifications.get(t, [])]\n  if EVENTBRIDGE_CONFIGURATION in existing_notifications:\n    external_notifications[EVENTBRIDGE_CONFIGURATION] = existing_notifications[EVENTBRIDGE_CONFIGURATION]\n\n  if request_type == 'Delete':\n    return external_notifications\n\n  notifications = {}\n  for t in CONFIGURATION_TYPES:\n    external = external_notifications.get(t, [])\n    incoming = [with_id(n) for n in notification_configuration.get(t, [])]\n    notifications[t] = external + incoming\n\n  if EVENTBRIDGE_CONFIGURATION in notification_configuration:\n    notifications[EVENTBRIDGE_CONFIGURATION] = notification_configuration[EVENTBRIDGE_CONFIGURATION]\n  elif EVENTBRIDGE_CONFIGURATION in external_notifications:\n    notifications[EVENTBRIDGE_CONFIGURATION] = external_notifications[EVENTBRIDGE_CONFIGURATION]\n\n  return notifications\n\ndef submit_response(event: dict, context, response_status: str, error_message: str):\n  response_body = json.dumps(\n    {\n      \"Status\": response_status,\n      \"Reason\": f\"{error_message}See the details in CloudWatch Log Stream: {context.log_stream_name}\",\n      \"PhysicalResourceId\": event.get(\"PhysicalResourceId\") or event[\"LogicalResourceId\"],\n      \"StackId\": event[\"StackId\"],\n      \"RequestId\": event[\"RequestId\"],\n      \"LogicalResourceId\": event[\"LogicalResourceId\"],\n      \"NoEcho\": False,\n    }\n  ).encode(\"utf-8\")\n  headers = {\"content-type\": \"\", \"content-length\": str(len(response_body))}\n  try:\n    req = urllib.request.Request(url=event[\"ResponseURL\"], headers=headers, data=response_body, method=\"PUT\")\n    with urllib.request.urlopen(req) as response:\n      print(response.read().decode(\"utf-8\"))\n    print(\"Status code: \" + response.reason)\n  except Exception as e:\n      print(\"send(..) failed executing request.urlopen(..): \" + str(e))\n\ndef sort_filter_rules(json_obj):\n  if not isinstance(json_obj, dict):\n      return json_obj\n  for key, value in json_obj.items():\n      if isinstance(value, dict):\n          json_obj[key] = sort_filter_rules(value)\n      elif isinstance(value, list):\n          json_obj[key] = [sort_filter_rules(item) for item in value]\n  if \"Filter\" in json_obj and \"Key\" in json_obj[\"Filter\"] and \"FilterRules\" in json_obj[\"Filter\"][\"Key\"]:\n      filter_rules = json_obj[\"Filter\"][\"Key\"][\"FilterRules\"]\n      sorted_filter_rules = sorted(filter_rules, key=lambda x: x[\"Name\"])\n      json_obj[\"Filter\"][\"Key\"][\"FilterRules\"] = sorted_filter_rules\n  return json_obj"
+    },
+    "Handler": "index.handler",
+    "Role": {
+     "Fn::GetAtt": [
+      "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC",
+      "Arn"
+     ]
+    },
+    "Runtime": "python3.13",
+    "Timeout": 300
+   },
+   "DependsOn": [
+    "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Resource"
+   }
+  },
+  "OnboardingNotificationsD2F24BE9": {
+   "Type": "AWS::SNS::Topic",
+   "Properties": {
+    "DisplayName": "Loan tape onboarding: completions and failures",
+    "TopicName": "loan-tape-onboarding-notifications"
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/OnboardingNotifications/Resource"
+   }
+  },
+  "UnprocessableTapesDlq2D2BC31F": {
+   "Type": "AWS::SQS::Queue",
+   "Properties": {
+    "MessageRetentionPeriod": 1209600,
+    "QueueName": "loan-tape-unprocessable-dlq",
+    "SqsManagedSseEnabled": true
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/UnprocessableTapesDlq/Resource"
+   }
+  },
+  "ValidateTapeLogGroupEB22BB54": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/ValidateTapeLogGroup/Resource"
+   }
+  },
+  "ValidateTapeFunctionServiceRole237B1BA7": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/ValidateTapeFunction/ServiceRole/Resource"
+   }
+  },
+  "ValidateTapeFunctionServiceRoleDefaultPolicyD8E25BD0": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "LoanTapeBucket9CC79B98",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "LoanTapeBucket9CC79B98",
+             "Arn"
+            ]
+           },
+           "/raw-uploads/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ValidateTapeFunctionServiceRoleDefaultPolicyD8E25BD0",
+    "Roles": [
+     {
+      "Ref": "ValidateTapeFunctionServiceRole237B1BA7"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/ValidateTapeFunction/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "ValidateTapeFunctionFDEF2140": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "S3Bucket": {
+      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+     },
+     "S3Key": "470cb8cc75506016560f232336a7f2b16dd62d8e42f8c041558ab5587003ad9d.zip"
+    },
+    "FunctionName": "loan-tape-validate",
+    "Handler": "handler.handler",
+    "LoggingConfig": {
+     "LogGroup": {
+      "Ref": "ValidateTapeLogGroupEB22BB54"
+     }
+    },
+    "MemorySize": 256,
+    "Role": {
+     "Fn::GetAtt": [
+      "ValidateTapeFunctionServiceRole237B1BA7",
+      "Arn"
+     ]
+    },
+    "Runtime": "python3.12",
+    "Timeout": 30
+   },
+   "DependsOn": [
+    "ValidateTapeFunctionServiceRoleDefaultPolicyD8E25BD0",
+    "ValidateTapeFunctionServiceRole237B1BA7"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/ValidateTapeFunction/Resource",
+    "aws:asset:path": "asset.470cb8cc75506016560f232336a7f2b16dd62d8e42f8c041558ab5587003ad9d",
+    "aws:asset:is-bundled": false,
+    "aws:asset:property": "Code"
+   }
+  },
+  "PipelineVpc0543904A": {
+   "Type": "AWS::EC2::VPC",
+   "Properties": {
+    "CidrBlock": "10.0.0.0/16",
+    "EnableDnsHostnames": true,
+    "EnableDnsSupport": true,
+    "InstanceTenancy": "default",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/Resource"
+   }
+  },
+  "PipelineVpcpublicSubnet1SubnetB337B1EA": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "eu-central-1a",
+    "CidrBlock": "10.0.0.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/Subnet"
+   }
+  },
+  "PipelineVpcpublicSubnet1RouteTable95EFE80C": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/RouteTable"
+   }
+  },
+  "PipelineVpcpublicSubnet1RouteTableAssociation6194459F": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "PipelineVpcpublicSubnet1RouteTable95EFE80C"
+    },
+    "SubnetId": {
+     "Ref": "PipelineVpcpublicSubnet1SubnetB337B1EA"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/RouteTableAssociation"
+   }
+  },
+  "PipelineVpcpublicSubnet1DefaultRoute577E19FB": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "PipelineVpcIGW3FA4A524"
+    },
+    "RouteTableId": {
+     "Ref": "PipelineVpcpublicSubnet1RouteTable95EFE80C"
+    }
+   },
+   "DependsOn": [
+    "PipelineVpcVPCGW3256101F"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/DefaultRoute"
+   }
+  },
+  "PipelineVpcpublicSubnet2SubnetD2D66B12": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "eu-central-1b",
+    "CidrBlock": "10.0.1.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/Subnet"
+   }
+  },
+  "PipelineVpcpublicSubnet2RouteTable70D75084": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/RouteTable"
+   }
+  },
+  "PipelineVpcpublicSubnet2RouteTableAssociation10372BF9": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "PipelineVpcpublicSubnet2RouteTable70D75084"
+    },
+    "SubnetId": {
+     "Ref": "PipelineVpcpublicSubnet2SubnetD2D66B12"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/RouteTableAssociation"
+   }
+  },
+  "PipelineVpcpublicSubnet2DefaultRoute21BAD130": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "PipelineVpcIGW3FA4A524"
+    },
+    "RouteTableId": {
+     "Ref": "PipelineVpcpublicSubnet2RouteTable70D75084"
+    }
+   },
+   "DependsOn": [
+    "PipelineVpcVPCGW3256101F"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/DefaultRoute"
+   }
+  },
+  "PipelineVpcIGW3FA4A524": {
+   "Type": "AWS::EC2::InternetGateway",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "ExaloanLoanPipelineStack/PipelineVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/IGW"
+   }
+  },
+  "PipelineVpcVPCGW3256101F": {
+   "Type": "AWS::EC2::VPCGatewayAttachment",
+   "Properties": {
+    "InternetGatewayId": {
+     "Ref": "PipelineVpcIGW3FA4A524"
+    },
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineVpc/VPCGW"
+   }
+  },
+  "PipelineCluster63B468F9": {
+   "Type": "AWS::ECS::Cluster",
+   "Properties": {
+    "ClusterName": "loan-pipeline-cluster"
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineCluster/Resource"
+   }
+  },
+  "PipelineTaskDefinitionTaskRole88F09B75": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/TaskRole/Resource"
+   }
+  },
+  "PipelineTaskDefinitionTaskRoleDefaultPolicy55677585": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "LoanTapeBucket9CC79B98",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "LoanTapeBucket9CC79B98",
+             "Arn"
+            ]
+           },
+           "/raw-uploads/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "LoanTapeBucket9CC79B98",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "LoanTapeBucket9CC79B98",
+             "Arn"
+            ]
+           },
+           "/processed/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineTaskDefinitionTaskRoleDefaultPolicy55677585",
+    "Roles": [
+     {
+      "Ref": "PipelineTaskDefinitionTaskRole88F09B75"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/TaskRole/DefaultPolicy/Resource"
+   }
+  },
+  "PipelineTaskDefinition5229ECC2": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "ContainerDefinitions": [
+     {
+      "Environment": [
+       {
+        "Name": "OUTPUT_PREFIX",
+        "Value": "processed/"
+       },
+       {
+        "Name": "INPUT_BUCKET",
+        "Value": {
+         "Ref": "LoanTapeBucket9CC79B98"
+        }
+       },
+       {
+        "Name": "OUTPUT_BUCKET",
+        "Value": {
+         "Ref": "LoanTapeBucket9CC79B98"
+        }
+       }
+      ],
+      "Essential": true,
+      "Image": {
+       "Fn::Join": [
+        "",
+        [
+         {
+          "Ref": "AWS::AccountId"
+         },
+         ".dkr.ecr.",
+         {
+          "Ref": "AWS::Region"
+         },
+         ".",
+         {
+          "Ref": "AWS::URLSuffix"
+         },
+         "/loan-pipeline:latest"
+        ]
+       ]
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "PipelineTaskDefinitionPipelineContainerLogGroup04F89DF9"
+        },
+        "awslogs-stream-prefix": "loan-pipeline",
+        "awslogs-region": {
+         "Ref": "AWS::Region"
+        }
+       }
+      },
+      "Name": "PipelineContainer"
+     }
+    ],
+    "Cpu": "1024",
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "PipelineTaskDefinitionExecutionRole7CBFD7CF",
+      "Arn"
+     ]
+    },
+    "Family": "ExaloanLoanPipelineStackPipelineTaskDefinition0119E0D6",
+    "Memory": "2048",
+    "NetworkMode": "awsvpc",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "PipelineTaskDefinitionTaskRole88F09B75",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/Resource"
+   }
+  },
+  "PipelineTaskDefinitionPipelineContainerLogGroup04F89DF9": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/PipelineContainer/LogGroup/Resource"
+   }
+  },
+  "PipelineTaskDefinitionExecutionRole7CBFD7CF": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/ExecutionRole/Resource"
+   }
+  },
+  "PipelineTaskDefinitionExecutionRoleDefaultPolicy19C2A736": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ecr:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":repository/loan-pipeline"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "PipelineTaskDefinitionPipelineContainerLogGroup04F89DF9",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineTaskDefinitionExecutionRoleDefaultPolicy19C2A736",
+    "Roles": [
+     {
+      "Ref": "PipelineTaskDefinitionExecutionRole7CBFD7CF"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PipelineTaskDefinition/ExecutionRole/DefaultPolicy/Resource"
+   }
+  },
+  "PersistResultsLogGroup2BF8BF7D": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PersistResultsLogGroup/Resource"
+   }
+  },
+  "PersistResultsFunctionServiceRoleD927F4E8": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Join": [
+       "",
+       [
+        "arn:",
+        {
+         "Ref": "AWS::Partition"
+        },
+        ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+       ]
+      ]
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PersistResultsFunction/ServiceRole/Resource"
+   }
+  },
+  "PersistResultsFunctionServiceRoleDefaultPolicyFFA61136": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "LoanTapeBucket9CC79B98",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "LoanTapeBucket9CC79B98",
+             "Arn"
+            ]
+           },
+           "/processed/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":secretsmanager:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":secret:exaloan/arangodb/onboarding-writer-??????"
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PersistResultsFunctionServiceRoleDefaultPolicyFFA61136",
+    "Roles": [
+     {
+      "Ref": "PersistResultsFunctionServiceRoleD927F4E8"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PersistResultsFunction/ServiceRole/DefaultPolicy/Resource"
+   }
+  },
+  "PersistResultsFunctionE4D70BD5": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "S3Bucket": {
+      "Fn::Sub": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}"
+     },
+     "S3Key": "e1e4399d9e21bdb49269f9f4f7073a73e0b836e3e1ca8bb67038b23b3b3443ef.zip"
+    },
+    "Environment": {
+     "Variables": {
+      "ARANGO_SECRET_ARN": {
+       "Fn::Join": [
+        "",
+        [
+         "arn:",
+         {
+          "Ref": "AWS::Partition"
+         },
+         ":secretsmanager:",
+         {
+          "Ref": "AWS::Region"
+         },
+         ":",
+         {
+          "Ref": "AWS::AccountId"
+         },
+         ":secret:exaloan/arangodb/onboarding-writer"
+        ]
+       ]
+      }
+     }
+    },
+    "FunctionName": "loan-tape-persist",
+    "Handler": "handler.handler",
+    "LoggingConfig": {
+     "LogGroup": {
+      "Ref": "PersistResultsLogGroup2BF8BF7D"
+     }
+    },
+    "MemorySize": 512,
+    "Role": {
+     "Fn::GetAtt": [
+      "PersistResultsFunctionServiceRoleD927F4E8",
+      "Arn"
+     ]
+    },
+    "Runtime": "python3.12",
+    "Timeout": 120
+   },
+   "DependsOn": [
+    "PersistResultsFunctionServiceRoleDefaultPolicyFFA61136",
+    "PersistResultsFunctionServiceRoleD927F4E8"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/PersistResultsFunction/Resource",
+    "aws:asset:path": "asset.e1e4399d9e21bdb49269f9f4f7073a73e0b836e3e1ca8bb67038b23b3b3443ef",
+    "aws:asset:is-bundled": false,
+    "aws:asset:property": "Code"
+   }
+  },
+  "RunLoanPipelineSecurityGroup540B9457": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "ExaloanLoanPipelineStack/RunLoanPipeline/SecurityGroup",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow all outbound traffic by default",
+      "IpProtocol": "-1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "PipelineVpc0543904A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/RunLoanPipeline/SecurityGroup/Resource"
+   }
+  },
+  "StateMachineLogGroup15B91BCB": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": "/aws/vendedlogs/states/loan-tape-onboarding",
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/StateMachineLogGroup/Resource"
+   }
+  },
+  "OnboardingStateMachineRole510A1A04": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "states.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/OnboardingStateMachine/Role/Resource"
+   }
+  },
+  "OnboardingStateMachineRoleDefaultPolicy14775FD0": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "lambda:InvokeFunction",
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PersistResultsFunctionE4D70BD5",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "ValidateTapeFunctionFDEF2140",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "PersistResultsFunctionE4D70BD5",
+             "Arn"
+            ]
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "ValidateTapeFunctionFDEF2140",
+             "Arn"
+            ]
+           },
+           ":*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "ecs:RunTask",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Fn::Select": [
+            1,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Ref": "PipelineTaskDefinition5229ECC2"
+              }
+             ]
+            }
+           ]
+          },
+          ":",
+          {
+           "Fn::Select": [
+            2,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Ref": "PipelineTaskDefinition5229ECC2"
+              }
+             ]
+            }
+           ]
+          },
+          ":",
+          {
+           "Fn::Select": [
+            3,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Ref": "PipelineTaskDefinition5229ECC2"
+              }
+             ]
+            }
+           ]
+          },
+          ":",
+          {
+           "Fn::Select": [
+            4,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Ref": "PipelineTaskDefinition5229ECC2"
+              }
+             ]
+            }
+           ]
+          },
+          ":",
+          {
+           "Fn::Select": [
+            0,
+            {
+             "Fn::Split": [
+              "/",
+              {
+               "Fn::Select": [
+                5,
+                {
+                 "Fn::Split": [
+                  ":",
+                  {
+                   "Ref": "PipelineTaskDefinition5229ECC2"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          "/",
+          {
+           "Fn::Select": [
+            1,
+            {
+             "Fn::Split": [
+              "/",
+              {
+               "Fn::Select": [
+                5,
+                {
+                 "Fn::Split": [
+                  ":",
+                  {
+                   "Ref": "PipelineTaskDefinition5229ECC2"
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          ":*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "ecs:DescribeTasks",
+        "ecs:StopTask",
+        "logs:CreateLogDelivery",
+        "logs:DeleteLogDelivery",
+        "logs:DescribeLogGroups",
+        "logs:DescribeResourcePolicies",
+        "logs:GetLogDelivery",
+        "logs:ListLogDeliveries",
+        "logs:PutResourcePolicy",
+        "logs:UpdateLogDelivery"
+       ],
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": "iam:PassRole",
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PipelineTaskDefinitionExecutionRole7CBFD7CF",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineTaskDefinitionTaskRole88F09B75",
+          "Arn"
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "sns:Publish",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "OnboardingNotificationsD2F24BE9"
+       }
+      },
+      {
+       "Action": "sqs:SendMessage",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "UnprocessableTapesDlq2D2BC31F",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "OnboardingStateMachineRoleDefaultPolicy14775FD0",
+    "Roles": [
+     {
+      "Ref": "OnboardingStateMachineRole510A1A04"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/OnboardingStateMachine/Role/DefaultPolicy/Resource"
+   }
+  },
+  "OnboardingStateMachine4D275089": {
+   "Type": "AWS::StepFunctions::StateMachine",
+   "Properties": {
+    "DefinitionString": {
+     "Fn::Join": [
+      "",
+      [
+       "{\"StartAt\":\"ValidateTape\",\"States\":{\"ValidateTape\":{\"Next\":\"RunLoanPipeline\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"States.ALL\"],\"IntervalSeconds\":15,\"MaxAttempts\":3,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"RecordUnprocessableTape\"}],\"Type\":\"Task\",\"ResultPath\":\"$.validation\",\"Resource\":\"",
+       {
+        "Fn::GetAtt": [
+         "ValidateTapeFunctionFDEF2140",
+         "Arn"
+        ]
+       },
+       "\"},\"RunLoanPipeline\":{\"Next\":\"PersistResults\",\"Retry\":[{\"ErrorEquals\":[\"States.ALL\"],\"IntervalSeconds\":15,\"MaxAttempts\":3,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"RecordUnprocessableTape\"}],\"Type\":\"Task\",\"ResultPath\":\"$.pipeline_run\",\"Resource\":\"arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":states:::ecs:runTask\",\"Parameters\":{\"Cluster\":\"",
+       {
+        "Fn::GetAtt": [
+         "PipelineCluster63B468F9",
+         "Arn"
+        ]
+       },
+       "\",\"TaskDefinition\":\"ExaloanLoanPipelineStackPipelineTaskDefinition0119E0D6\",\"NetworkConfiguration\":{\"AwsvpcConfiguration\":{\"AssignPublicIp\":\"ENABLED\",\"Subnets\":[\"",
+       {
+        "Ref": "PipelineVpcpublicSubnet1SubnetB337B1EA"
+       },
+       "\",\"",
+       {
+        "Ref": "PipelineVpcpublicSubnet2SubnetD2D66B12"
+       },
+       "\"],\"SecurityGroups\":[\"",
+       {
+        "Fn::GetAtt": [
+         "RunLoanPipelineSecurityGroup540B9457",
+         "GroupId"
+        ]
+       },
+       "\"]}},\"Overrides\":{\"ContainerOverrides\":[{\"Name\":\"PipelineContainer\",\"Environment\":[{\"Name\":\"INPUT_KEY\",\"Value.$\":\"$.validation.key\"},{\"Name\":\"LENDER_ID\",\"Value.$\":\"$.validation.lender_id\"},{\"Name\":\"RUN_ID\",\"Value.$\":\"$$.Execution.Name\"}]}]},\"LaunchType\":\"FARGATE\",\"PlatformVersion\":\"LATEST\"}},\"PersistResults\":{\"Next\":\"NotifyCompletion\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"States.ALL\"],\"IntervalSeconds\":15,\"MaxAttempts\":3,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"RecordUnprocessableTape\"}],\"Type\":\"Task\",\"ResultPath\":\"$.persisted\",\"Resource\":\"",
+       {
+        "Fn::GetAtt": [
+         "PersistResultsFunctionE4D70BD5",
+         "Arn"
+        ]
+       },
+       "\",\"Parameters\":{\"bucket\":\"",
+       {
+        "Ref": "LoanTapeBucket9CC79B98"
+       },
+       "\",\"key.$\":\"States.Format('processed/{}/{}/report.json', $.validation.lender_id, $$.Execution.Name)\",\"lender_id.$\":\"$.validation.lender_id\",\"run_id.$\":\"$$.Execution.Name\"}},\"NotifyCompletion\":{\"End\":true,\"Type\":\"Task\",\"Resource\":\"arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":states:::sns:publish\",\"Parameters\":{\"TopicArn\":\"",
+       {
+        "Ref": "OnboardingNotificationsD2F24BE9"
+       },
+       "\",\"Message.$\":\"$\",\"Subject\":\"Loan tape onboarding completed\"}},\"RecordUnprocessableTape\":{\"Next\":\"NotifyFailure\",\"Type\":\"Task\",\"Resource\":\"arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":states:::sqs:sendMessage\",\"Parameters\":{\"QueueUrl\":\"",
+       {
+        "Ref": "UnprocessableTapesDlq2D2BC31F"
+       },
+       "\",\"MessageBody.$\":\"$\"}},\"NotifyFailure\":{\"Next\":\"OnboardingFailed\",\"Type\":\"Task\",\"Resource\":\"arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":states:::sns:publish\",\"Parameters\":{\"TopicArn\":\"",
+       {
+        "Ref": "OnboardingNotificationsD2F24BE9"
+       },
+       "\",\"Message.$\":\"$\",\"Subject\":\"Loan tape onboarding failed\"}},\"OnboardingFailed\":{\"Type\":\"Fail\",\"Cause\":\"Loan tape could not be processed\"}},\"TimeoutSeconds\":1800}"
+      ]
+     ]
+    },
+    "LoggingConfiguration": {
+     "Destinations": [
+      {
+       "CloudWatchLogsLogGroup": {
+        "LogGroupArn": {
+         "Fn::GetAtt": [
+          "StateMachineLogGroup15B91BCB",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Level": "ALL"
+    },
+    "RoleArn": {
+     "Fn::GetAtt": [
+      "OnboardingStateMachineRole510A1A04",
+      "Arn"
+     ]
+    },
+    "StateMachineName": "loan-tape-onboarding"
+   },
+   "DependsOn": [
+    "OnboardingStateMachineRoleDefaultPolicy14775FD0",
+    "OnboardingStateMachineRole510A1A04"
+   ],
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/OnboardingStateMachine/Resource"
+   }
+  },
+  "RawUploadRule4E05A2E7": {
+   "Type": "AWS::Events::Rule",
+   "Properties": {
+    "EventPattern": {
+     "detail": {
+      "bucket": {
+       "name": [
+        {
+         "Ref": "LoanTapeBucket9CC79B98"
+        }
+       ]
+      },
+      "object": {
+       "key": [
+        {
+         "prefix": "raw-uploads/"
+        }
+       ]
+      }
+     },
+     "detail-type": [
+      "Object Created"
+     ],
+     "source": [
+      "aws.s3"
+     ]
+    },
+    "Name": "loan-tape-raw-upload",
+    "State": "ENABLED",
+    "Targets": [
+     {
+      "Arn": {
+       "Ref": "OnboardingStateMachine4D275089"
+      },
+      "Id": "Target0",
+      "RoleArn": {
+       "Fn::GetAtt": [
+        "EventBridgeToStepFunctionsRoleE7CFD755",
+        "Arn"
+       ]
+      }
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/RawUploadRule/Resource"
+   }
+  },
+  "EventBridgeToStepFunctionsRoleE7CFD755": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "events.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/EventBridgeToStepFunctionsRole/Resource"
+   }
+  },
+  "EventBridgeToStepFunctionsRoleDefaultPolicy4509F74B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "states:StartExecution",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "OnboardingStateMachine4D275089"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "EventBridgeToStepFunctionsRoleDefaultPolicy4509F74B",
+    "Roles": [
+     {
+      "Ref": "EventBridgeToStepFunctionsRoleE7CFD755"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/EventBridgeToStepFunctionsRole/DefaultPolicy/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/12S227bMAyGn6X3jLYlQItdptlSFGiBzC56G9AK42h2JFekGhiC3n2QD027K378SYgnLdXy9qf6foMXXuhDs2hNpWIpqBvAC+8jr1S8D7ohgc3RTjSae2RKYPCs4s61Rvc5Y6LCtZTdbBOwZRVfXGd01gZIwG+s4p9AYUgcIEHralbxydUP3oUuB2ZO0OK5OqCK22C1GGdzdOYEvNojMwmrdTZAeqniazdUfN1tYBeq1ugyVHYc5UqFC0IvWI0dj/pVWzM7bXAuOAQyPFohb0keUOiC/VRm8tYiqE9nsgIl6eCN9B8DfRESkGYVN21gIZ/DM27R15h74OYXHY01cwf/K84KGkv+quVHvSqoc2zE+T4fClioO07b4r0gN6xiaXnYC5+gfOOS7OGZmLEmeBqW/WjfXUPwW3MRhsLp6zsqbtG0UAoKPaM+GTvu8JOfgN7JCqtYhOlPhJZSGojYBa8JPmC4XSlYG1sn2PVycvbbSv1Yqrubv2zMwgcr5kyqGO0/xqIzh78CAAA="
+   },
+   "Metadata": {
+    "aws:cdk:path": "ExaloanLoanPipelineStack/CDKMetadata/Default"
+   },
+   "Condition": "CDKMetadataAvailable"
+  }
+ },
+ "Conditions": {
+  "CDKMetadataAvailable": {
+   "Fn::Or": [
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "af-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-northeast-3"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-south-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-3"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ap-southeast-4"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ca-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "ca-west-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "cn-north-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "cn-northwest-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-central-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-north-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-south-2"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Or": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "eu-west-3"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "il-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "me-central-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "me-south-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "sa-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-east-1"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-east-2"
+       ]
+      },
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "AWS::Region"
+        },
+        "us-west-1"
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AWS::Region"
+      },
+      "us-west-2"
+     ]
+    }
+   ]
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}

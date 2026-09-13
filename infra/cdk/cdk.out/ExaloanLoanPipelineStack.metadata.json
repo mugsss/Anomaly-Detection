@@ -1,0 +1,614 @@
+{
+  "/ExaloanLoanPipelineStack": [
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "CloudFormation-Validate::W3010": "Literal AZs in template are the result of accessing stack.availabilityZones, this is expected and safe"
+      },
+      "trace": [
+        "    ...aws-cdk-lib, jsii runtime...",
+        "    (no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/LoanTapeBucket/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LoanTapeBucket9CC79B98"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/OnboardingNotifications/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "OnboardingNotificationsD2F24BE9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/UnprocessableTapesDlq/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "UnprocessableTapesDlq2D2BC31F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/ValidateTapeLogGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ValidateTapeLogGroupEB22BB54"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/ValidateTapeFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ValidateTapeFunctionFDEF2140"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpc0543904A"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/IGW": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcIGW3FA4A524"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/VPCGW": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcVPCGW3256101F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineCluster/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineCluster63B468F9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinition5229ECC2"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PersistResultsLogGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PersistResultsLogGroup2BF8BF7D"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PersistResultsFunction/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PersistResultsFunctionE4D70BD5"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/StateMachineLogGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "StateMachineLogGroup15B91BCB"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/OnboardingStateMachine/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "OnboardingStateMachine4D275089"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/RawUploadRule/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "RawUploadRule4E05A2E7"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/EventBridgeToStepFunctionsRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "EventBridgeToStepFunctionsRoleE7CFD755"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/CDKMetadata/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadata"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/CDKMetadata/Condition": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadataAvailable"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/LoanTapeBucket/Notifications/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LoanTapeBucketNotificationsD24CE5C9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/ValidateTapeFunction/ServiceRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ValidateTapeFunctionServiceRole237B1BA7"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/Subnet": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet1SubnetB337B1EA"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/RouteTable": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet1RouteTable95EFE80C"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/RouteTableAssociation": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet1RouteTableAssociation6194459F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet1/DefaultRoute": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet1DefaultRoute577E19FB"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:210 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib, jsii runtime..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/Subnet": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet2SubnetD2D66B12"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/RouteTable": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet2RouteTable70D75084"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/RouteTableAssociation": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet2RouteTableAssociation10372BF9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:270 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineVpc/publicSubnet2/DefaultRoute": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineVpcpublicSubnet2DefaultRoute21BAD130"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        ".../var/folders/fm/hdbk2l411d3fh4dnr4hzz34m0000gn/T/jsii-kernel-fVcErU/node_modules/aws-cdk-lib/aws-ec2/lib/vpc.js:1:210 in aws-cdk-lib...",
+        "Array.forEach (:)",
+        "...aws-cdk-lib, jsii runtime..."
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/TaskRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinitionTaskRole88F09B75"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/ExecutionRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinitionExecutionRole7CBFD7CF"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PersistResultsFunction/ServiceRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PersistResultsFunctionServiceRoleD927F4E8"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/RunLoanPipeline/SecurityGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "RunLoanPipelineSecurityGroup540B9457"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/OnboardingStateMachine/Role/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "OnboardingStateMachineRole510A1A04"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime, node internals...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/EventBridgeToStepFunctionsRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "EventBridgeToStepFunctionsRoleDefaultPolicy4509F74B"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/LoanTapeBucket/Notifications/HandlerPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LoanTapeBucketNotificationsHandlerPolicy47484A9A"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/ValidateTapeFunction/ServiceRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "ValidateTapeFunctionServiceRoleDefaultPolicyD8E25BD0"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/TaskRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinitionTaskRoleDefaultPolicy55677585"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/PipelineContainer/LogGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinitionPipelineContainerLogGroup04F89DF9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PipelineTaskDefinition/ExecutionRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PipelineTaskDefinitionExecutionRoleDefaultPolicy19C2A736"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/PersistResultsFunction/ServiceRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "PersistResultsFunctionServiceRoleDefaultPolicyFFA61136"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/ExaloanLoanPipelineStack/OnboardingStateMachine/Role/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "OnboardingStateMachineRoleDefaultPolicy14775FD0"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib, jsii runtime...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ]
+}

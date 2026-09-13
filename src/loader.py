@@ -74,6 +74,10 @@ COLUMN_MAP: dict[str, str] = {
     "borrower liabilities": "borrower_liabilities",
     "family liabilities": "family_liabilities",
     "dti": "dti",
+    "birth year": "birth_year",
+    "annual revenue": "annual_revenue",
+    "number of employees": "number_of_employees",
+    "company type": "company_type",
 }
 
 DATE_FIELDS = {"disbursal_date", "expected_repayment_date", "repayment_date"}
@@ -82,8 +86,9 @@ FLOAT_FIELDS = {
     "repaid_principal", "outstanding_interest", "repaid_interest", "arrears",
     "months_at_employer", "years_working_total", "borrower_income",
     "family_income", "borrower_liabilities", "family_liabilities", "dti",
+    "annual_revenue",
 }
-INT_FIELDS = {"loan_term", "days_late"}
+INT_FIELDS = {"loan_term", "days_late", "birth_year", "number_of_employees"}
 
 
 @dataclass(slots=True)
@@ -141,7 +146,7 @@ def parse_date(value: Any) -> date | None:
 def _to_float(value: Any) -> float | None:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     text = str(value).strip().replace("%", "").replace(",", "")
     if not text or text.lower() in {"nan", "none", "null", "-"}:

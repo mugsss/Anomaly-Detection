@@ -7,160 +7,88 @@ Data quality pipeline that ingests loan tape Excel files, detects anomalies in b
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m src loans.xlsx                  # writes output/report.csv
-python -m src loans.xlsx --json output/report.json  # also writes JSON
+python -m src loans.xlsx                  # writes output/report.csv + report.json
 pytest                                    # 176 tests
 ```
 
-## Results
+**Results:** 72 loans analysed, 20 flagged (27.8%), 52 normal, 13 data warnings (truncated exports). Both clean reference loans (32271989, 99981632) produce zero findings. Loan 37216892 is flagged CRITICAL with four anomalies.
 
-| Metric | Count |
-|--------|-------|
-| Loans analysed | 72 |
-| Flagged (anomalies detected) | 20 (27.8%) |
-| Normal (no anomalies) | 52 |
-| Data warnings (truncated export, not flagged) | 13 |
+## Approach and Design Decisions
 
-Reference loans from the assignment brief:
-- **32271989**: NORMAL, zero anomalies, no warnings
-- **99981632**: NORMAL, zero anomalies, no warnings
-- **37216892**: FLAGGED/CRITICAL with 4 anomalies (overdue payments, terminated status, XIRR mismatch, employment contradiction)
+Each detector is a pure function: takes a `Loan`, returns a list of `Anomaly` findings or an empty list. No shared state, no side effects, no dependency on other detectors. Adding or removing a rule is a one-line change to the registry. This makes them independently testable, trivially parallelizable, and safe to extend.
+
+Truncated payment histories (13 loans hit Excel's 32767-character cell limit) are handled as data warnings, not anomalies. Mixing export-quality noise with real findings inflated the flagged count to 44%. Separating them gives a cleaner signal while still documenting which checks were skipped.
+
+The pipeline never crashes on bad data. Each loan is processed in isolation with per-loan error catching, so one broken row does not stop the remaining 71 from being processed.
 
 ## Detection Methodology
 
-The pipeline runs eight independent detectors over each loan. Every detector is a pure function that takes a `Loan` object and returns a list of `Anomaly` findings, or an empty list if nothing is wrong. Detectors never raise exceptions, never mutate the loan, and never depend on each other, so adding or removing a rule is a one-line change to the registry.
+Eight independent detectors, each documented in `src/detectors.py`:
 
-Truncated payment histories (13 loans hit Excel's 32767-character cell limit) are handled separately as data warnings, not anomalies. They annotate the report with which checks were skipped, without flagging the loan.
+| # | Rule | Severity | What it catches |
+|---|------|----------|-----------------|
+| 1 | Payment default (90+ days or pending late) | CRITICAL | 6 loans with overdue/stalled payments |
+| 2 | Near-zero interest vs stated rate | HIGH | 5 loans booking effectively zero interest |
+| 3 | XIRR vs stated rate mismatch (>5pp) | HIGH | 17 loans with realized rate divergence |
+| 4 | Employment contradiction | MEDIUM | 4 "unemployed" borrowers with occupations |
+| 5 | Income > family income | MEDIUM | 1 impossible income relationship |
+| 6 | Loan status cross-check | CRITICAL | 1 terminated loan (37216892) |
+| 7 | Amortization formula mismatch | HIGH | 0 in this tape (guard prevents false positives) |
+| 8 | Structural data validity | HIGH/MEDIUM | 0 in this tape (safety net for other exports) |
 
-### Rule 1: Payment Default (CRITICAL)
+Key calibration decisions: XIRR uses one-sided checking for deferred annuity loans (their structure realizes ~55% of the nominal rate by design). The amortization rule stands down when the payment schedule runs well past the stated term (restructured loans). The interest detector falls back to summing payment-history entries when summary columns are NULL.
 
-Flags any loan where a payment was settled 90 or more days after its scheduled date, or where payments remain in state `pending late` with no repayment date.
+## Architecture (Part 2)
 
-The 90-day threshold follows standard lending practice (and is called out in the assignment). Early repayments that show as negative delays are ignored. For loans like 37216892, the `pending late` state with no settlement date is a separate signal from the delay calculation: the borrower has stopped paying entirely.
+### Why Step Functions + Fargate, Not Just Lambda
 
-**Catches**: 79811839 (613 days), 96579687 (302), 65318525 (237), 61752881 (228), 31397492 (140), 37216892 (7 pending-late payments, 271 days late).
+The Part 1 pipeline loads the full tape into pandas, parses nested payment dicts, and solves XIRR per loan. For tapes with thousands of rows, this easily exceeds Lambda's 15-minute timeout and 10 GB memory ceiling. Fargate has no fixed limits on either, and it charges per second of actual compute with no idle capacity between runs.
 
-### Rule 2: Interest Calculation (HIGH)
+Step Functions orchestrates the three-step flow (validate, run pipeline, persist to ArangoDB) with built-in retry, backoff, and catch chains. Each step's failure path routes to a DLQ and an SNS notification so a stuck onboarding is never silent. This is simpler and more observable than wiring retry logic into application code or chaining Lambdas through SQS.
 
-Compares total booked interest (repaid + outstanding) against a rough expected value: `principal * rate * term / 2`. A ratio below 0.05 means the loan collected effectively zero interest despite carrying a real rate.
+Lambda handles the two lightweight bookend steps (format validation and ArangoDB persistence) where cold start latency is acceptable and execution time is under 30 seconds.
 
-When the summary interest columns are NULL (three deferred-annuity loans), the detector falls back to summing interest-typed payments from the history. This caught 14146974, 35294697, and 46313736, which book exactly 0.00 interest at 25%, 25%, and 19% respectively.
+### Flow
 
-**Catches**: 17611322 (0.01 on 129 at 33%), 58271697 (0.14 on 367 at 21%), 14146974, 35294697, 46313736 (all zero via payment fallback).
+S3 upload (`raw-uploads/{lender_id}/`) triggers an EventBridge rule, which starts the Step Functions state machine. Step 1 (Lambda) validates the file. Step 2 (Fargate) runs the Part 1 pipeline and writes `processed/{lender_id}/{run_id}/report.json`. Step 3 (Lambda) reads the report and upserts results to ArangoDB via its HTTP API. On success, SNS notifies the operations team. On failure after retries, the file reference goes to the DLQ.
 
-### Rule 3: XIRR vs Stated Rate (HIGH)
+S3 lifecycle moves raw uploads to Glacier after 90 days (financial records, never deleted). Old object versions transition after 30 days. CloudWatch retains logs for one month with alarms on state machine failures.
 
-Builds borrower-perspective cash flows (disbursal out, every payment in, including contract fees) and computes the internal rate of return using pyxirr. Flags when the realized rate diverges from the stated nominal rate by more than 5 percentage points.
-
-Three guards prevent false positives:
-
-1. **Truncated loans are skipped** since incomplete cash flows produce meaningless rates.
-2. **Deferred annuity loans are checked one-sided.** Their structure realizes well below the nominal rate by design (the sample tape shows a consistent ratio near 0.55x), so only a rate *above* the stated one is evidence of a broken calculation. This is why 26961823 (43%) and 82251944 (50%) are correctly not flagged.
-3. **Short-horizon loans are skipped.** When the weighted-average life is under ~2.5 months, annualizing produces unstable results. This excludes restructured loan 99981632, whose payment history spans two concatenated schedules.
-
-**Catches**: 17 loans total, including all 5 default loans (whose irregular cash flows distort the IRR), the 5 near-zero-interest loans, and 7 others with material rate divergence.
-
-### Rule 4: Employment Contradiction (MEDIUM)
-
-Flags borrowers recorded as "unemployed" who also carry a non-empty occupation field. All four cases in the tape have `months_at_employer = 0`, reinforcing the contradiction.
-
-**Catches**: 37216892 ("Skyriaus vadovas/shift leader"), 31397492 ("Pardaveja/Saleswoman"), 78579969 ("Suvirintojas/locksmith"), 13314659 ("Aukletojos padejeja/Tutor's helper").
-
-### Rule 5: Income Inconsistency (MEDIUM)
-
-Flags any loan where the borrower's income exceeds the family income. Family income is the household total and includes the borrower, so it is a hard upper bound.
-
-**Catches**: 53926762 (borrower 1041.98, family 870.98, difference 171.00).
-
-### Rule 6: Loan Status (CRITICAL)
-
-Cross-checks the loan status against balances and arrears. A terminated loan is always reported. A "repaid" loan with outstanding principal, or a non-terminated loan 90+ days late, are flagged as contradictions.
-
-**Catches**: 37216892 (terminated with 3666.87 outstanding principal and 271 days late).
-
-### Rule 7: Amortization Formula (HIGH)
-
-For instalment loans, compares the stated monthly payment against the standard annuity formula `P * r(1+r)^n / ((1+r)^n - 1)`, adding the median contract fee (since `Monthly payment` in this tape is the borrower's full instalment). Deferred annuity loans are excluded since the formula does not describe their payment structure.
-
-The rule also requires the stated term to be corroborated by the payment schedule. When the schedule runs well past the stated term (a restructured loan), the formula would be tested against the wrong `n`, so the rule stands down. This is what prevents clean reference loan 99981632 from being flagged: its stated term is 7 months but its history spans 78.
-
-**Catches**: No loans in this tape (the three candidates are already caught by other rules, and their schedule/term mismatch triggers the stand-down).
-
-### Rule 8: Structural Data Validity (HIGH/MEDIUM)
-
-Safety net for fields that other lender tapes commonly get wrong: negative monetary values, missing required fields (disbursal date, amount, rate, term), repayment date before disbursal, and payment records that carry a different loan ID. The current tape is clean on all of these, but the rule exists so the pipeline does not silently pass a broken export.
-
-**Catches**: None in this tape.
+The CDK stack (`infra/cdk/`) synthesizes cleanly with `cdk synth` and models this full flow. The GitHub Actions workflow (`.github/workflows/ci.yml`) runs lint, test, CDK synth, Docker build, and ECR push.
 
 ## Scaling Beyond 72 Loans
 
-The current implementation loads the full tape into memory with pandas and processes loans sequentially. This already handles thousands of loans without issues: pandas reads a 10,000-row Excel file in seconds, each detector runs in microseconds per loan, and the per-loan memory footprint (a `Loan` dataclass with its parsed payments) is small. 
+The current implementation handles thousands of loans without issues: pandas reads a 10,000-row Excel file in seconds, and each detector runs in microseconds per loan. Three properties make further scaling straightforward: per-loan isolation (no cross-loan state, so detection parallelizes trivially across cores or Fargate tasks), a streaming-ready loader (`iter_loans()` yields one loan at a time), and additive reporting (swap the CSV writer for a database sink at higher volumes).
 
-Three properties of the codebase make scaling straightforward:
+## Production Roadmap
 
-### Per-loan isolation
+With more time and access to multiple lender tapes:
 
-Every detector is a pure function that takes one `Loan` and returns findings. There is no cross-loan state, no shared counters, no global accumulators. Each loan can be processed independently, which means:
-
-- **Parallel detection.** Distributing loans across a `ProcessPoolExecutor` (or across Fargate tasks in Part 2) requires no synchronization. The XIRR solver is the most CPU-intensive rule, and it benefits directly from additional cores.
-- **Error containment.** A bad row or a crashing detector is caught per-loan. The pipeline logs the error and continues to the next loan. This is tested: `test_a_failing_detector_does_not_stop_the_run` asserts that one broken detector does not prevent the remaining 71 loans from being processed.
-
-### Streaming-ready loader
-
-The `iter_loans()` generator in `loader.py` already yields one loan at a time. For larger files, replacing the pandas backend with `openpyxl`'s read-only mode (`load_workbook(read_only=True)`) would stream rows without loading the full sheet into memory. The detector pipeline does not care where the `Loan` object came from.
-
-For tapes arriving as CSV or Parquet (common at higher volumes), the same interface works: swap the reader, keep the detectors.
-
-### Additive reporting
-
-The reporter accumulates results incrementally. At higher volumes, writing to a database (PostgreSQL/RDS in the Part 2 architecture) instead of a CSV gives consumers filtering by severity, anomaly type, and date range without loading the full report.
-
-## AI Usage
-
-This project was built with AI-assisted development (Claude Code). AI was used for:
-
-- **Exploratory data analysis**: profiling the dataset, identifying the 13 truncated payment histories, discovering the date format mismatch between loan-level columns (ISO) and payment dicts (dd/mm/yyyy), and calibrating detection thresholds against the reference loans.
-- **Code generation**: writing the detector functions, loader, pipeline orchestration, reporter, and test suite. Every function was generated with explicit requirements (the detector interface contract, error isolation, the pure-function constraint) and verified against the known clean and dirty loans before moving to the next piece.
-- **Threshold tuning**: the XIRR rule's one-sided deferred-annuity treatment, the amortization rule's term-corroboration guard, and the interest rule's payment-history fallback were all developed iteratively by running the candidate rule against all 72 loans and adjusting until the two clean references produced zero findings while the seeded anomalies were caught.
-
-No LLM runs inside the pipeline at runtime. All detection is deterministic: rule-based checks with fixed thresholds and no probabilistic components. This means every run on the same input produces the same output, every finding can be traced to a specific field comparison, and there is no need for LLM evaluation or fallback logic in production.
+- **Cross-tape balance continuity.** Compare opening balances in a new tape against closing balances in the previous one to catch gaps or double-counted periods.
+- **Loan count reconciliation.** Track expected vs actual loan counts per lender across submissions. A sudden drop or spike signals a broken export.
+- **Duplicate borrower detection.** Fuzzy matching on borrower name, ID, and address across lenders to flag the same individual appearing under different identifiers.
+- **LTV and collateral parsing.** Extract loan-to-value ratios and collateral descriptions when present, flag loans where the LTV exceeds lender policy thresholds.
+- **Statistical baseline per lender.** Build rolling distributions of flag rates, interest spreads, and default frequencies per lender. Flag submissions that deviate significantly from that lender's historical norm.
+- **Configurable thresholds.** Move magic numbers (90-day default, 5pp XIRR tolerance) into a per-lender config file so operations can tune without code changes.
 
 ## Project Structure
 
 ```
-src/
-    __init__.py
-    __main__.py       # CLI entry point: python -m src [loans.xlsx]
-    models.py         # Loan, Payment, Anomaly, LoanResult, Severity
-    loader.py         # Excel ingestion, payment parsing, truncation repair
-    detectors.py      # 8 detection rules + 1 warning rule
-    pipeline.py       # orchestration: load -> detect -> report
-    reporter.py       # CSV and JSON output
-tests/
-    conftest.py       # shared fixtures, synthetic loan builders
-    test_loader.py    # 41 tests: parsing, truncation, column resolution
-    test_detectors.py # 99 tests: per-rule unit + regression on the full tape
-    test_pipeline.py  # 36 tests: orchestration, error isolation, reporter output
-output/
-    report.csv        # per-loan summary (7 columns, 72 rows)
-    report.json       # structured report with evidence dicts
-requirements.txt
-ruff.toml             # lint config (ruff check passes clean)
+src/                        # Part 1: detection pipeline
+    models.py               # Loan, Payment, Anomaly, LoanResult, Severity
+    loader.py               # Excel ingestion, payment parsing, truncation repair
+    detectors.py            # 8 detection rules + 1 warning rule
+    pipeline.py             # load -> detect -> report orchestration
+    reporter.py             # CSV and JSON output
+tests/                      # 176 tests (pytest)
+infra/                      # Part 2: AWS architecture
+    diagram.py              # diagrams-as-code source
+    diagram.png             # architecture diagram
+    cdk/                    # AWS CDK stack (passes cdk synth)
+.github/workflows/
+    ci.yml                  # CI/CD pipeline (GitHub Actions)
+docker/
+    run_pipeline.py         # Fargate entrypoint
+Dockerfile                  # Part 1 pipeline container
+AI_DISCLOSURE.md            # AI usage disclosure
 ```
-
-## Design Decisions
-
-**Pure-function detectors.** Each rule is a standalone function with no side effects, no shared state, and no dependency on other rules. This makes them independently testable, trivially parallelizable, and safe to add or remove without regression risk.
-
-**Warnings vs anomalies.** Truncated payment histories are a property of the export, not the loan. Treating them as anomalies inflated the flagged count to 44% and mixed export-quality noise with real findings. Moving them to a separate `data_warnings` channel gives a cleaner signal (20 flagged = 27.8%) while still documenting which checks were skipped.
-
-**Contract-fee-aware amortization.** The tape's `Monthly payment` field is the borrower's total instalment, including the contract fee. Without accounting for the fee, every loan looks 5-20% understated against the annuity formula, and clean reference loan 99981632 gets flagged. Adding the median contract fee to the expected payment eliminates systematic bias.
-
-**One-sided XIRR for deferred annuity.** Deferred annuity loans realize roughly 55% of their nominal rate by design (interest accrues during a grace period but payments are deferred). Checking both directions would flag every deferred annuity loan in the tape. Checking only the upside catches the four loans with genuinely broken interest calculations while leaving the fourteen healthy ones alone.
-
-## What I Would Improve With More Time
-
-- **Term vs schedule mismatch as its own detector.** 20 loans have a stated term that disagrees with their payment schedule by more than one month. The amortization rule currently stands down for these (to avoid false positives), but the mismatch itself is worth reporting as a data quality finding.
-- **Payment schedule gap detection.** Look for missing monthly instalments in the payment history (months with no scheduled principal payment), which could indicate deleted records or export errors.
-- **Configurable thresholds.** Move the magic numbers (90-day default, 5pp XIRR tolerance, 30% amortization tolerance, 0.05 interest floor) into a YAML or TOML config file so they can be tuned per lender without code changes.
-- **Parquet/CSV input support.** The loader currently only handles Excel via openpyxl. Adding a file-type dispatcher would let the same pipeline handle the formats lenders actually use at scale.
