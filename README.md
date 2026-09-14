@@ -59,7 +59,6 @@ At a million rows: chunk into batches of ~1,000 (detect and write per chunk, the
 
 **Part 1:** Claude (Anthropic) for EDA, code generation (loader, detectors, pipeline, tests), and threshold calibration. **Part 2:** CDK stack generation, CI/CD pipeline definition, Dockerfile, Fargate wrapper, and the diagrams-as-code diagram.
 
-No LLM runs at inference time: every detector is deterministic Python with no model calls, API dependencies, or probabilistic outputs. The pipeline produces the same results on every run.
 
 ### What I personally verified and changed
 
@@ -90,5 +89,4 @@ infra/                      # Part 2: AWS architecture
 docker/
     run_pipeline.py         # Fargate entrypoint
 Dockerfile                  # Part 1 pipeline container
-AI_DISCLOSURE.md            # AI usage disclosure
 ```
