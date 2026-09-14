@@ -12,6 +12,7 @@ from aws_cdk import (
     RemovalPolicy,
     Stack,
 )
+from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_events as events
@@ -67,8 +68,22 @@ class LoanPipelineStack(Stack):
         # is memory- and CPU-heavier than Lambda's limits once tapes
         # reach thousands of rows.
         # ---------------------------------------------------------------
+        vpc = ec2.Vpc(
+            self,
+            "PipelineVpc",
+            ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
+            availability_zones=["eu-central-1a", "eu-central-1b"],
+            nat_gateways=0,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24,
+                )
+            ],
+        )
         cluster = ecs.Cluster(
-            self, "PipelineCluster", cluster_name="loan-pipeline-cluster"
+            self, "PipelineCluster", cluster_name="loan-pipeline-cluster", vpc=vpc
         )
 
         task_definition = ecs.FargateTaskDefinition(
@@ -111,6 +126,8 @@ class LoanPipelineStack(Stack):
             launch_target=tasks.EcsFargateLaunchTarget(
                 platform_version=ecs.FargatePlatformVersion.LATEST
             ),
+            assign_public_ip=True,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             container_overrides=[
                 tasks.ContainerOverride(
                     container_definition=container,
