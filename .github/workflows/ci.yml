@@ -59,7 +59,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install -g aws-cdk@2.150.0
+      - run: npm install -g aws-cdk@latest
       - working-directory: infra/cdk
         run: pip install -r requirements.txt
       - working-directory: infra/cdk
