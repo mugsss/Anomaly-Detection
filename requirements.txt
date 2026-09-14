@@ -2,3 +2,7 @@ pandas>=2.2
 openpyxl>=3.1
 pyxirr>=0.10
 pytest>=8.0
+
+# CDK
+aws-cdk-lib>=2.150
+constructs>=10.0

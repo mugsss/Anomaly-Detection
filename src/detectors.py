@@ -142,12 +142,25 @@ def build_cash_flows(loan: Loan) -> list[tuple[date, float]]:
     """
     if loan.disbursal_date is None or not loan.loan_amount:
         return []
+
+    early_types = {"full early repayment", "partial early repayment"}
+    paid_early_dates: set[date] = set()
+    for p in loan.payments:
+        if p.paid_date is not None and p.payment_type in early_types:
+            paid_early_dates.add(p.due_date or p.paid_date)
+
     flows: list[tuple[date, float]] = [(loan.disbursal_date, -float(loan.loan_amount))]
     for payment in loan.payments:
-        when = payment.settlement_date
-        if when is None or not payment.amount:
+        if not payment.amount:
             continue
-        flows.append((when, float(payment.amount)))
+        if payment.paid_date is not None:
+            flows.append((payment.paid_date, float(payment.amount)))
+        elif payment.state == "pending late":
+            continue
+        elif payment.payment_type in early_types and payment.due_date in paid_early_dates:
+            continue
+        elif payment.due_date is not None:
+            flows.append((payment.due_date, float(payment.amount)))
     return flows
 
 
@@ -167,8 +180,7 @@ def weighted_average_life(loan: Loan, flows: list[tuple[date, float]]) -> float:
 def compute_xirr(flows: list[tuple[date, float]]) -> float | None:
     """Internal rate of return for dated cash flows, as a decimal fraction.
 
-    Prefers pyxirr; falls back to bisection so the pipeline and its tests run
-    without the optional dependency.
+    Uses pyxirr when available, otherwise falls back to bisection.
     """
     if len(flows) < 2:
         return None
@@ -180,13 +192,10 @@ def compute_xirr(flows: list[tuple[date, float]]) -> float | None:
         return xirr(flows)
     except ImportError:
         return _xirr_bisect(flows)
-    except Exception as exc:
-        logger.debug("pyxirr failed (%s), falling back to bisection", exc)
-        return _xirr_bisect(flows)
 
 
 def _xirr_bisect(flows: list[tuple[date, float]], tolerance: float = 1e-7) -> float | None:
-    """Bisection XIRR fallback. Returns None when no root exists in range."""
+    """Bisection XIRR when pyxirr is not installed."""
     start = min(when for when, _ in flows)
 
     def npv(rate: float) -> float:

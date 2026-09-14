@@ -14,13 +14,10 @@ from datetime import date
 import pytest
 
 from src.detectors import (
-    DEFAULT_DELAY_DAYS,
     DETECTORS,
-    MIN_INTEREST_RATIO,
     TRUNCATION_WARNING,
     WARNING_RULES,
     XIRR_TOLERANCE_PP,
-    _xirr_bisect,
     build_cash_flows,
     compute_xirr,
     detect_age_at_origination,
@@ -184,13 +181,9 @@ class TestInterestAnomaly:
 
 
 class TestXirr:
-    def test_bisection_matches_a_known_rate(self):
+    def test_known_rate(self):
         flows = [(date(2024, 1, 1), -1000.0), (date(2025, 1, 1), 1100.0)]
-        assert _xirr_bisect(flows) == pytest.approx(0.10, abs=1e-3)
-
-    def test_compute_xirr_agrees_with_the_fallback(self):
-        flows = [(date(2024, 1, 1), -1000.0), (date(2025, 1, 1), 1200.0)]
-        assert compute_xirr(flows) == pytest.approx(_xirr_bisect(flows), abs=1e-4)
+        assert compute_xirr(flows) == pytest.approx(0.10, abs=1e-3)
 
     def test_returns_none_without_a_sign_change(self):
         assert compute_xirr([(date(2024, 1, 1), 100.0), (date(2025, 1, 1), 50.0)]) is None
@@ -201,9 +194,13 @@ class TestXirr:
         assert flows[0] == (date(2024, 1, 1), -1200.0)
         assert flows[1] == (date(2024, 6, 1), 50.0)
 
-    def test_unsettled_payments_use_the_scheduled_date(self):
+    def test_pending_payments_use_due_date(self):
         loan = make_loan(payments=[make_payment("2024-06-01", None, state="pending")])
         assert build_cash_flows(loan)[1][0] == date(2024, 6, 1)
+
+    def test_pending_late_payments_are_excluded(self):
+        loan = make_loan(payments=[make_payment("2024-06-01", None, state="pending late")])
+        assert len(build_cash_flows(loan)) == 1  # disbursal only
 
     def test_skips_truncated_loans(self):
         loan = make_loan(

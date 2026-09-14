@@ -23,7 +23,7 @@ from diagrams.aws.integration import SF, SNS, SQS
 from diagrams.aws.management import Cloudwatch, CloudwatchAlarm
 from diagrams.aws.security import SecretsManager
 from diagrams.aws.storage import S3, S3Glacier
-from diagrams.generic.database import SQL as GenericDatabase
+from diagrams.aws.database import Database as GenericDatabase
 from PIL import Image, ImageDraw, ImageFont
 
 GRAPH_ATTR = {
@@ -76,43 +76,43 @@ with Diagram(
     outformat="png",
 ):
     with Cluster("Ingestion  (per-lender namespacing: <prefix>/{lender_id}/...)"):
-        raw = S3("raw-uploads/\n(hot, versioned)")
-        archive = S3Glacier("archive/\n(Glacier after 90d)")
+        raw = S3("raw-uploads/\nS3")
+        archive = S3Glacier("archive/\nS3 Glacier")
         raw >> Edge(style="dashed", label="lifecycle\n90 days") >> archive
 
     with Cluster("Onboarding State Machine (Step Functions)"):
-        state_machine = SF("Standard workflow\nretry w/ backoff\nper step")
+        state_machine = SF("Standard workflow\nretry w/ backoff\nper step\nStep Functions")
 
         with Cluster("Step 1: Validate"):
-            validate = Lambda("Validate\nformat + columns")
+            validate = Lambda("Validate\nformat + columns\nLambda")
 
         with Cluster("Step 2: Run Pipeline"):
-            cluster_icon = ECS("Fargate cluster")
-            pipeline_task = Fargate("Part 1 pipeline\n(detect anomalies)")
+            cluster_icon = ECS("ECS cluster\nECS")
+            pipeline_task = Fargate("Part 1 pipeline\n(detect anomalies)\nFargate")
             cluster_icon >> pipeline_task
 
         with Cluster("Step 3: Persist"):
-            persist = Lambda("Persist results")
+            persist = Lambda("Persist results\nLambda")
 
         state_machine >> validate >> pipeline_task >> persist
 
-    processed = S3("processed/\n(reports)")
+    processed = S3("processed/\n(reports)\nS3")
     pipeline_task >> Edge(label="report.json") >> processed
     processed >> Edge(style="dashed", label="read") >> persist
 
     with Cluster("Results store"):
-        arango_secret = SecretsManager("ArangoDB\ncredentials")
-        arango = GenericDatabase("ArangoDB\n(existing cluster)")
+        arango_secret = SecretsManager("ArangoDB\ncredentials\nSecrets Manager")
+        arango = GenericDatabase("ArangoDB")
         arango_secret >> Edge(label="GetSecretValue") >> persist
         persist >> Edge(label="upsert per loan") >> arango
 
     with Cluster("Notifications & DLQ"):
-        dlq = SQS("Unprocessable\ntapes DLQ")
-        notifications = SNS("Onboarding\nnotifications")
+        dlq = SQS("Unprocessable\ntapes DLQ\nSQS")
+        notifications = SNS("Onboarding\nnotifications\nSNS")
         dlq >> Edge(color="firebrick") >> notifications
 
     raw >> Edge(
-        label="ObjectCreated\n(EventBridge)", color="darkgreen", style="bold"
+        label="ObjectCreated\nEventBridge", color="darkgreen", style="bold"
     ) >> state_machine
     validate - Edge(style="dotted", color="firebrick", label="on failure, after retries") - dlq
     pipeline_task - Edge(style="dotted", color="firebrick") - dlq
@@ -121,9 +121,9 @@ with Diagram(
 
     with Cluster("Monitoring"):
         dashboard = Cloudwatch(
-            "Dashboard:\nloans processed,\nflag rate, error rate,\nFargate duration"
+            "Dashboard:\nloans processed,\nflag rate, error rate,\nFargate duration\nCloudWatch"
         )
-        alarm = CloudwatchAlarm("Alarm on\nstate-machine failure")
+        alarm = CloudwatchAlarm("Alarm on\nstate-machine failure\nCloudWatch Alarm")
         dashboard >> alarm
 
     validate >> Edge(style="dashed", color="gray50") >> dashboard
