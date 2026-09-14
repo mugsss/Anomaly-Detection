@@ -107,7 +107,6 @@ class Loan:
     # Payment history
     payments: list[Payment] = field(default_factory=list)
     payments_truncated: bool = False
-    payments_dropped: int = 0
     # Everything else from the source row, plus parse diagnostics
     extra: dict[str, Any] = field(default_factory=dict)
     parse_warnings: list[str] = field(default_factory=list)
@@ -129,14 +128,13 @@ class Anomaly:
     """A single reason a loan was flagged.
 
     `code` is the stable machine-readable identifier, `reason` the human
-    sentence that lands in the report, `evidence` the numbers behind it.
+    sentence that lands in the report.
     """
 
     code: str
     severity: Severity
     reason: str
     detector: str = ""
-    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

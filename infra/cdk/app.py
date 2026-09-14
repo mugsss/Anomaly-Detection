@@ -25,7 +25,7 @@ region = app.node.try_get_context("region")
 LoanPipelineStack(
     app,
     "ExaloanLoanPipelineStack",
-    description="Loan-tape onboarding: S3 -> Step Functions -> Fargate -> ArangoDB",
+    description="Loan-tape onboarding",
     env=cdk.Environment(account=account, region=region) if account or region else None,
 )
 

@@ -293,9 +293,9 @@ def row_to_loan(row: dict[str, Any], columns: dict[str, str], row_number: int) -
     return loan
 
 
-def _resolve_columns(frame_columns: Any) -> dict[str, str]:
+def _resolve_columns(raw_headers: list[str]) -> dict[str, str]:
     """Map our field names onto whatever the file actually calls its columns."""
-    by_normalised = {_normalise(c): c for c in frame_columns}
+    by_normalised = {_normalise(c): c for c in raw_headers}
     resolved = {
         field_name: by_normalised[source]
         for source, field_name in COLUMN_MAP.items()
@@ -306,10 +306,58 @@ def _resolve_columns(frame_columns: Any) -> dict[str, str]:
     return resolved
 
 
+def _open_worksheet(path: Path, sheet: str | int = 0):
+    """Open an Excel worksheet in read-only streaming mode.
+
+    Returns (workbook, worksheet, headers). The caller must close the workbook
+    when finished. Read-only mode never loads the entire file into memory, so
+    this scales to arbitrarily large tapes.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    if isinstance(sheet, int):
+        ws = wb.worksheets[sheet]
+    else:
+        ws = wb[sheet]
+    rows = ws.iter_rows()
+    header_cells = next(rows)
+    headers = [str(c.value) if c.value is not None else "" for c in header_cells]
+    return wb, ws, rows, headers
+
+
+def _iter_rows_streaming(
+    path: Path, sheet: str | int = 0
+) -> Iterator[tuple[dict[str, Any], int, dict[str, str], list[str]]]:
+    """Yield (row_dict, row_number, column_map, raw_headers) per data row.
+
+    Uses openpyxl's read-only mode: only one row is in memory at a time.
+    """
+    wb, _ws, rows, headers = _open_worksheet(path, sheet)
+    columns = _resolve_columns(headers)
+    try:
+        for position, row_cells in enumerate(rows, start=2):
+            record = {
+                headers[i]: cell.value
+                for i, cell in enumerate(row_cells)
+                if i < len(headers)
+            }
+            yield record, position, columns, headers
+    finally:
+        wb.close()
+
+
 def iter_loans(path: str | Path, sheet: str | int = 0) -> Iterator[Loan]:
-    """Yield loans one at a time. Convenient for streaming over large tapes."""
-    loans, _ = load_loans(path, sheet=sheet)
-    yield from loans
+    """Yield loans one at a time, streaming from disk.
+
+    Only one row is in memory at a time, so this scales to tapes of any size.
+    Rows that fail to parse are logged and skipped.
+    """
+    for record, position, columns, _headers in _iter_rows_streaming(Path(path), sheet):
+        try:
+            yield row_to_loan(record, columns, position)
+        except Exception as exc:
+            logger.error("Row %d skipped: %s", position, exc)
 
 
 def load_loans(
@@ -320,19 +368,20 @@ def load_loans(
     report = LoadReport()
     logger.info("Reading loan tape from %s", path)
 
-    frame = pd.read_excel(path, sheet_name=sheet, dtype=object)
-    columns = _resolve_columns(frame.columns)
-
-    expected = set(COLUMN_MAP.values()) | {"payments"}
-    report.missing_columns = sorted(expected - set(columns))
-    if report.missing_columns:
-        logger.warning(
-            "Loan tape is missing %d expected columns: %s",
-            len(report.missing_columns), ", ".join(report.missing_columns),
-        )
-
     loans: list[Loan] = []
-    for position, record in enumerate(frame.to_dict(orient="records"), start=2):
+    columns: dict[str, str] = {}
+
+    for record, position, columns, headers in _iter_rows_streaming(path, sheet):
+        if report.rows_seen == 0:
+            resolved_fields = set(columns)
+            expected = set(COLUMN_MAP.values()) | {"payments"}
+            report.missing_columns = sorted(expected - resolved_fields)
+            if report.missing_columns:
+                logger.warning(
+                    "Loan tape is missing %d expected columns: %s",
+                    len(report.missing_columns), ", ".join(report.missing_columns),
+                )
+
         report.rows_seen += 1
         try:
             loan = row_to_loan(record, columns, position)

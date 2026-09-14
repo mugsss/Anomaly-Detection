@@ -35,7 +35,6 @@ def detect_duplicate_loan_ids(loans: Sequence[Loan]) -> dict[int, list[Anomaly]]
                 severity=Severity.MEDIUM,
                 reason=f"Loan ID {lid} appears {counts[lid]} times in the tape",
                 detector="detect_duplicate_loan_ids",
-                evidence={"loan_id": lid, "count": counts[lid]},
             )
         ]
     return results

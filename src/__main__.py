@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .pipeline import run_pipeline
-from .reporter import format_console_summary, write_csv, write_json
+from .reporter import format_console_summary, write_json
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,8 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Detect data-quality anomalies in a loan tape.",
     )
     parser.add_argument("tape", nargs="?", default="loans.xlsx", help="path to the Excel loan tape")
-    parser.add_argument("-o", "--output", default="output/report.csv", help="CSV report path")
-    parser.add_argument("--json", dest="json_output", default=None, help="also write a JSON report")
+    parser.add_argument("-o", "--output", default="output/report.json", help="JSON report path")
     parser.add_argument("--sheet", default=0, help="worksheet name or index")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     parser.add_argument("--quiet", action="store_true", help="suppress the console summary")
@@ -41,9 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     sheet = int(args.sheet) if str(args.sheet).isdigit() else args.sheet
     outcome = run_pipeline(tape, sheet=sheet)
 
-    write_csv(outcome, args.output)
-    if args.json_output:
-        write_json(outcome, args.json_output)
+    write_json(outcome, args.output)
 
     if not args.quiet:
         print(format_console_summary(outcome))

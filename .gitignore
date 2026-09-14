@@ -9,4 +9,5 @@ build/
 dist/
 .ruff_cache/
 *.pdf
-claude.md
+CLAUDE.md
+infra/cdk/cdk.out/
